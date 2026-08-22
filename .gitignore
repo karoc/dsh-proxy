@@ -11,6 +11,7 @@ lib/
 npm-debug.log*
 pnpm-debug.log*
 .npm-cache/
+.nodemodules/
 
 # Editors / OS
 .DS_Store
