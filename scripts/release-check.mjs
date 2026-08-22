@@ -169,6 +169,18 @@ try {
   // E404 or network failure: treated as "not published yet"
 }
 
+// 9. the publish command chain is executable: prepublishOnly runs `tsdown`,
+//    which npm resolves from node_modules/.bin. A project that was never
+//    really installed (no .bin/tsdown) would fail mid-publish with
+//    `tsdown: not found` — catch that BEFORE the publish starts.
+//    pnpm/npm both create .bin/tsdown (or tsdown.cmd on Windows).
+const binTsdown = ['node_modules/.bin/tsdown', 'node_modules/.bin/tsdown.cmd', 'node_modules/.bin/tsdown.ps1']
+  .map((p) => join(root, p))
+  .find((p) => existsSync(p))
+if (!binTsdown) {
+  fail('node_modules/.bin/tsdown is missing — the project has no installed devDependencies; run `pnpm install` first (prepublishOnly runs tsdown)')
+}
+
 if (failures.length > 0) {
   console.error('\n❌ release-check FAILED — release is BLOCKED:')
   for (const f of failures) console.error(`   - ${f}`)
