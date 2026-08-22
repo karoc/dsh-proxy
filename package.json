@@ -1,0 +1,62 @@
+{
+  "name": "dsh-proxy",
+  "version": "0.1.0",
+  "description": "External DeepSeek Harness plugin: a model-provider forward proxy with per-host routing and a Settings page.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": { "default": "./lib/index.js" },
+    "./client": { "default": "./lib/client.js" },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "bundle": "tsdown --config ./tsdown.config.ts",
+    "prepare": "tsdown --config ./tsdown.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test scripts/proxy-core.spec.mjs scripts/host-route.spec.mjs scripts/client-boot.spec.mjs scripts/cordis-mount.spec.mjs",
+    "accept": "node scripts/accept-gui.mjs && node scripts/verify-tooltip.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "prepack": "node scripts/release-check.mjs",
+    "prepublishOnly": "node scripts/release-check.mjs && tsdown --config ./tsdown.config.ts",
+    "postpublish": "node scripts/post-publish-check.mjs"
+  },
+  "engines": { "node": ">=18" },
+  "keywords": ["deepseek-harness", "dsh", "plugin", "proxy", "model-provider", "settings"],
+  "author": "karoc",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/karoc/dsh-proxy.git" },
+  "bugs": { "url": "https://github.com/karoc/dsh-proxy/issues" },
+  "homepage": "https://github.com/karoc/dsh-proxy",
+  "publishConfig": { "access": "public" },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "~18.3.1",
+    "react": "^18.2.0",
+    "tsdown": "^0.22.0",
+    "typescript": "^5.6.0"
+  },
+  "peerDependencies": { "react": "^18.2.0" }
+}

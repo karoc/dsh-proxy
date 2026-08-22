@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+lib/
+*.tsbuildinfo
+
+# npm / pnpm artifacts
+*.tgz
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.npm-cache/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Agent workspace metadata (internal, not part of the published project)
+.agents/
+KANBAN.json
