@@ -23,7 +23,7 @@ To see the plugin live in the GUI, link it into a profile:
 
 ```jsonc
 // ~/.dsh/profiles/web/package.json
-"dependencies": { "dsh-proxy": "link:/path/to/dsh-proxy", ... },
+"dependencies": { "@karoc/dsh-proxy": "link:/path/to/dsh-proxy", ... },
 "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", ..., "dsh-proxy"] } }
 ```
 
@@ -89,8 +89,8 @@ plus the tarball contents.
   version. Bump to the next version and tag it instead of overwriting.
 - The first publish of a brand-new package: the post-publish registry poll
   covers the whole-package-not-yet-visible case; if it still times out, verify
-  manually with `npm view dsh-proxy versions` — do not re-publish the same
-  version without checking.
+  manually with `npm view @karoc/dsh-proxy versions` — do not re-publish the
+  same version without checking.
 
 ## License
 

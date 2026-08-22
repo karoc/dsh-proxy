@@ -55,7 +55,7 @@ if (!visible) {
   console.error(`\n⚠️  ${name}@${version} did not become visible on the registry after `
     + `${Math.round((POLL_ATTEMPTS * POLL_INTERVAL_MS) / 1000)}s of polling.`)
   console.error('   The publish may have failed before the upload completed, or the index')
-  console.error('   is still catching up. Verify manually with `npm view dsh-proxy versions`.')
+  console.error('   is still catching up. Verify manually with `npm view ' + `${name} versions`` + '.')
   console.error(`   Do NOT re-publish ${version} without checking — it may be live.`)
   process.exit(1)
 }

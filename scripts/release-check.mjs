@@ -163,7 +163,7 @@ if (stale.length > 0) {
 
 // 8. not already published (best effort; offline or 404 means not published).
 try {
-  const published = run(`npm view ${JSON.stringify('dsh-proxy')}@${version} version`)
+  const published = run(`npm view ${JSON.stringify('@karoc/dsh-proxy')}@${version} version`)
   if (published.length > 0) fail(`version ${version} is already published on npm (${published}) — bump the version`)
 } catch {
   // E404 or network failure: treated as "not published yet"

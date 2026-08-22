@@ -2,9 +2,9 @@
 
 [English](README.md) | 简体中文
 
-[![npm version](https://img.shields.io/npm/v/dsh-proxy.svg)](https://www.npmjs.com/package/dsh-proxy)
-[![npm downloads](https://img.shields.io/npm/dm/dsh-proxy.svg)](https://www.npmjs.com/package/dsh-proxy)
-[![license MIT](https://img.shields.io/npm/l/dsh-proxy.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/@karoc/dsh-proxy.svg)](https://www.npmjs.com/package/@karoc/dsh-proxy)
+[![npm downloads](https://img.shields.io/npm/dm/@karoc/dsh-proxy.svg)](https://www.npmjs.com/package/@karoc/dsh-proxy)
+[![license MIT](https://img.shields.io/npm/l/@karoc/dsh-proxy.svg)](LICENSE)
 
 一个**外部** DeepSeek Harness 插件：为**模型提供方**提供带**按主机路由**的**正向代理**，并附带一个专职设置页。
 
@@ -72,10 +72,10 @@ dsh host 进程
 
 ### 从 npm 安装（推荐）
 
-包已发布到 npm，名为 `dsh-proxy`：
+包已发布到 npm，名为 `@karoc/dsh-proxy`：
 
 ```sh
-dsh plugin --profile web add dsh-proxy
+dsh plugin --profile web add @karoc/dsh-proxy
 ```
 
 安装预构建 bundle 并追加到 `web` profile。然后**重启 `dsh web`**，打开 **设置 → 代理 / Proxy**。

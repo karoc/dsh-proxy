@@ -2,9 +2,9 @@
 
 English | [简体中文](README.zh.md)
 
-[![npm version](https://img.shields.io/npm/v/dsh-proxy.svg)](https://www.npmjs.com/package/dsh-proxy)
-[![npm downloads](https://img.shields.io/npm/dm/dsh-proxy.svg)](https://www.npmjs.com/package/dsh-proxy)
-[![license MIT](https://img.shields.io/npm/l/dsh-proxy.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/@karoc/dsh-proxy.svg)](https://www.npmjs.com/package/@karoc/dsh-proxy)
+[![npm downloads](https://img.shields.io/npm/dm/@karoc/dsh-proxy.svg)](https://www.npmjs.com/package/@karoc/dsh-proxy)
+[![license MIT](https://img.shields.io/npm/l/@karoc/dsh-proxy.svg)](LICENSE)
 
 An **external** DeepSeek Harness plugin: a model-provider **forward proxy** with
 **per-host routing**, plus a **Settings page** dedicated to model-provider
@@ -98,10 +98,10 @@ file while dsh runs — it is re-read live.
 
 ### From npm (recommended)
 
-The package is published to npm as `dsh-proxy`:
+The package is published to npm as `@karoc/dsh-proxy`:
 
 ```sh
-dsh plugin --profile web add dsh-proxy
+dsh plugin --profile web add @karoc/dsh-proxy
 ```
 
 This installs the prebuilt bundle and appends it to the `web` profile. Then **restart `dsh web`** and open **Settings → 代理 / Proxy**.

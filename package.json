@@ -1,5 +1,5 @@
 {
-  "name": "dsh-proxy",
+  "name": "@karoc/dsh-proxy",
   "version": "0.1.0",
   "description": "External DeepSeek Harness plugin: a model-provider forward proxy with per-host routing and a Settings page.",
   "type": "module",
