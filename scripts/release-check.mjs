@@ -170,15 +170,17 @@ try {
 }
 
 // 9. the publish command chain is executable: prepublishOnly runs `tsdown`,
-//    which npm resolves from node_modules/.bin. A project that was never
-//    really installed (no .bin/tsdown) would fail mid-publish with
-//    `tsdown: not found` — catch that BEFORE the publish starts.
-//    pnpm/npm both create .bin/tsdown (or tsdown.cmd on Windows).
-const binTsdown = ['node_modules/.bin/tsdown', 'node_modules/.bin/tsdown.cmd', 'node_modules/.bin/tsdown.ps1']
-  .map((p) => join(root, p))
-  .find((p) => existsSync(p))
-if (!binTsdown) {
-  fail('node_modules/.bin/tsdown is missing — the project has no installed devDependencies; run `pnpm install` first (prepublishOnly runs tsdown)')
+//    which npm resolves from node_modules/.bin (npm puts that dir on PATH
+//    for lifecycle scripts). A project that was never really installed
+//    (no .bin/tsdown) would fail mid-publish with `tsdown: not found` —
+//    catch that BEFORE the publish starts. We resolve via PATH exactly like
+//    the lifecycle runner does, so custom modules dirs also work.
+let tsdownBin = ''
+try {
+  tsdownBin = execSync('command -v tsdown || true', { cwd: root, encoding: 'utf8', shell: '/bin/sh' }).trim()
+} catch { /* empty PATH lookup — treated as missing below */ }
+if (tsdownBin === '') {
+  fail('tsdown is not resolvable from PATH — the project has no installed devDependencies; run `pnpm install` first (prepublishOnly runs tsdown)')
 }
 
 if (failures.length > 0) {
