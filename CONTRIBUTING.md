@@ -54,6 +54,14 @@ tag). The gate script (`pnpm release:check`, also run by `prepack` and
 5. Working tree is clean (everything committed).
 6. `lib/` is present and fresh (run `pnpm bundle` after touching `src/`).
 7. The version is not already published on npm.
+8. **Identity parity:** `tsdown.config.ts` module-table ID, the loader entry
+   `name` in `cordis.patch.yml`, and the host `export const name` in
+   `src/index.ts` must all equal the npm package name (`@karoc/dsh-proxy`).
+   `client-modules` serves graph rows under the package name and the browser
+   awaits factories under that exact id; a mismatch drops the client half on
+   dsh ≥ 0.1.2. Runtime business ids (settings.section id, locale NS, CSS
+   prefix, style-tag marker) intentionally stay `dsh-proxy`. The `release-check`
+   gate does not verify this — check it before tagging.
 
 Release steps:
 

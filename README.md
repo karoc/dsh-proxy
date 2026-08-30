@@ -196,6 +196,13 @@ module table; everything else is inlined.
   external plugin cannot set it without patching the shell. When DSH exposes a
   per-section icon, use `IconGlobeOutline14` from `dsh-client-ui-primitives`
   for this section.
+- **Works with dsh ≥ 0.1.2 when installed the official way.** The loader
+  entry name, bundle registration id, and host plugin name are all
+  `@karoc/dsh-proxy` (matching the npm package name). Hand-written `link:`
+  dependencies are not recognized as packages by newer loaders — install via
+  `dsh plugin --profile web add @karoc/dsh-proxy` (npm) or
+  `dsh plugin --profile web add link:/path/to/dsh-proxy` (source), then restart
+  `dsh web`.
 - The desktop shell (`dsh-desktop`) keeps its own proxy and tray settings
   window — this plugin is a standalone extraction, not a replacement. Both can
   coexist (e.g. install `dsh-proxy` into the shell's profile to get the

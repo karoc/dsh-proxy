@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.1]
+
+- **dsh 0.1.2 compatibility:** the loader identity now matches the npm package
+  name everywhere. `client-modules` serves graph rows under the package name
+  (`@karoc/dsh-proxy`) and the browser module system awaits factories
+  registered under that exact id — the bundle previously registered as
+  `dsh-proxy` (the pre-rename tsdown ID), so on dsh ≥ 0.1.2 the entry import
+  failed and cascaded into duplicate-factory errors that dropped every
+  external plugin's client half. Aligned: module-table ID (`tsdown.config.ts`),
+  loader entry `name` (`cordis.patch.yml`, the runtime id stays `dsh-proxy`),
+  and the host `export const name`. Runtime business ids (settings.section id,
+  locale namespace, CSS prefix, style-tag marker) are unchanged.
+- **First tarball with the correct scoped identity:** the 0.1.0 tarball shipped
+  the old unscoped patch/ID, which worked on dsh < 0.1.2 but failed the graph
+  row match on newer dsh. 0.1.1 is the first release where the package name,
+  loader entry name, bundle registration id, and host name are all
+  `@karoc/dsh-proxy`.
+- **Release-flow hardening:** `release:check` now fails fast when `tsdown` is
+  not resolvable from PATH (a never-installed project would otherwise fail
+  mid-publish with `tsdown: not found`); fixes a template-literal syntax error
+  in `post-publish-check.mjs` that crashed the postpublish lifecycle (and hid
+  the fact that the upload had actually succeeded).
+- Tests: `client-boot.spec.mjs` asserts the scoped registration id; engine /
+  host-route / mount / tooltip acceptance suites unchanged and passing.
+
 ## [0.1.0]
 
 - Initial release: external DeepSeek Harness plugin providing a model-provider

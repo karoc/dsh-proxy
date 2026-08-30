@@ -149,6 +149,7 @@ bundle 把平台包（`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client
 - **代理是进程级出站点，不是模型逐请求读的开关。** 它通过把进程的 `HTTP(S)_PROXY` 指向自身来实现。本插件 host `apply()` 之后 dsh 发起的请求（任何子进程、以及 global dispatcher 仍是惰性的 undici fetch）会走代理。若某个 dsh 内部 fetch 在插件加载前就已实体化了 dispatcher，可能不会走它——文档化的解法是重启 dsh（桌面壳通过 spawn dsh 前设环境变量来施加同样的边界）。
 - `npm`/`pnpm` 安装/更新流量与其它一样走代理；改动**与安装/更新相关的主机**会在下次安装/更新时生效（已在进行的操作保留其环境）。
 - **设置页导航图标由壳分配，插件无法自定义。** 内置 `ui-settings-general` 的 `SettingsRoot.tsx` `navIcon(id)` 只映射已知 id，其它 id（包括本节的 `dsh-proxy`）一律齿轮。`settings.section` 注册没有 icon 字段，外部插件不 patch 壳就改不了。等 DSH 开放每节图标后，本节建议用 `dsh-client-ui-primitives` 的 `IconGlobeOutline14`。
+- **dsh ≥ 0.1.2 需以官方方式安装才生效。** loader entry 名、bundle 注册 id、host 插件名三者均为 `@karoc/dsh-proxy`（与 npm 包名一致）。新版 loader 不再把手写 `link:` 依赖识别为包——请用 `dsh plugin --profile web add @karoc/dsh-proxy`（npm）或 `dsh plugin --profile web add link:/path/to/dsh-proxy`（源码）安装，然后重启 `dsh web`。
 - 桌面壳（`dsh-desktop`）保留自己的代理与托盘设置窗口——本插件是独立抽取，不是替代品。两者可共存（例如把 `dsh-proxy` 装进壳的 profile，同时获得 dsh 内设置页）。
 
 ## License
