@@ -2,7 +2,9 @@
 # package so the host loader resolves the node half and client-modules serves
 # exports["./client"] at /plugins/dsh-proxy/client.js. The host half starts the
 # loopback forward proxy and registers /proxy/api; the client half registers
-# the settings.section settings page.
+# the settings.section settings page. The loader entry `name` must equal the
+# npm package name (@karoc/dsh-proxy) — client-modules resolves it as a
+# package; the runtime plugin id stays `dsh-proxy`.
 - insert:
     - id: dsh-proxy
-      name: dsh-proxy
+      name: '@karoc/dsh-proxy'

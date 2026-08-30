@@ -44,8 +44,10 @@ if (unknown.length > 0) {
   process.exit(1)
 }
 
-// Banner/footer contract: the module-table loader wrapper.
-assert.match(code, /window\.__ModuleLoader__\.load\(\{[\s\S]*?id: "dsh-proxy"[\s\S]*?factory:/, 'has __ModuleLoader__.load with id dsh-proxy')
+// Banner/footer contract: the module-table loader wrapper. The registration id
+// must equal the npm package name — client-modules serves graph rows under the
+// package name and the module system awaits factories registered under it.
+assert.match(code, /window\.__ModuleLoader__\.load\(\{[\s\S]*?id: "@karoc\/dsh-proxy"[\s\S]*?factory:/, 'has __ModuleLoader__.load with id @karoc/dsh-proxy')
 assert.match(code, /return module\.exports;\s*\}\s*\}\);/, 'has closing factory footer')
 
 console.log('PASS — client bundle: all require() targets are known platform externals; loader wrapper intact.')

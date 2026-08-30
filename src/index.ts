@@ -36,7 +36,11 @@ import {
   type UpstreamConfig,
 } from './proxy-core.ts'
 
-export const name = 'dsh-proxy'
+// Host plugin identity must equal the loader entry name (the npm package
+// name, per cordis.patch.yml) so the loader's row resolves this module.
+// Runtime business ids (settings.section id, locale NS, CSS prefix, style tag
+// marker) stay 'dsh-proxy' — they are decoupled from the package identity.
+export const name = '@karoc/dsh-proxy'
 export const inject = ['webServer']
 
 /** Resolve the harness home: $DSH_HOME (blank = unset) else ~/.dsh. */

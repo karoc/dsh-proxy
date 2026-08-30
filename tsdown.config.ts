@@ -1,6 +1,12 @@
 import { defineConfig } from 'tsdown'
 
-const ID = 'dsh-proxy'
+// The bundle's module-table registration id must equal the npm package name:
+// client-modules serves the graph under the package name (@karoc/dsh-proxy)
+// and the browser module system awaits a factory registered under that exact
+// id. A mismatch (e.g. registering 'dsh-proxy' while the graph row is
+// '@karoc/dsh-proxy') makes the import of this entry fail and can cascade
+// into duplicate-factory errors for the whole combo batch.
+const ID = '@karoc/dsh-proxy'
 const CLIENT_EXTERNALS: readonly string[] = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
