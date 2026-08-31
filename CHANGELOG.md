@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.2]
+
+- **Brand name**: DSH Smoothly Proxy (DSH SP) — used in the README, settings page title, and changelog.
+
 ## [0.1.1]
 
 - **dsh 0.1.2 compatibility:** the loader identity now matches the npm package

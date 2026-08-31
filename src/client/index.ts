@@ -1,10 +1,11 @@
 /**
- * Proxy settings plugin, browser half (external, not part of the DSH
- * repository). Registers a Settings page that configures the loopback forward
- * proxy for model providers (upstream proxy + per-host routing), reading and
- * writing <DSH_HOME>/proxy.json through the host half's /proxy/api route. It
- * rides the same `settings.section` slot seam the built-in Models page uses,
- * so official updates to the repository never touch it.
+ * Proxy settings plugin (DSH Smoothly Proxy / DSH SP), browser half (external,
+ * not part of the DSH repository). Registers a Settings page that configures
+ * the loopback forward proxy for model providers (upstream proxy + per-host
+ * routing), reading and writing <DSH_HOME>/proxy.json through the host half's
+ * /proxy/api route. It rides the same `settings.section` slot seam the
+ * built-in Models page uses, so official updates to the repository never touch
+ * it.
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'

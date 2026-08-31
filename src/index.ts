@@ -1,7 +1,7 @@
 /**
- * dsh-proxy host half: starts the loopback forward proxy, points the process's
- * egress traffic at it, and serves the /proxy/api route the settings page
- * reads and writes.
+ * dsh-proxy host half (DSH Smoothly Proxy / DSH SP): starts the loopback
+ * forward proxy, points the process's egress traffic at it, and serves the
+ * /proxy/api route the settings page reads and writes.
  *
  * Egress wiring (mirrors dsh-desktop's server-manager):
  *   NODE_USE_ENV_PROXY=1 makes undici's global fetch honor the *PROXY env vars

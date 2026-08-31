@@ -1,7 +1,7 @@
 {
   "name": "@karoc/dsh-proxy",
-  "version": "0.1.1",
-  "description": "External DeepSeek Harness plugin: a model-provider forward proxy with per-host routing and a Settings page.",
+  "version": "0.1.2",
+  "description": "DSH Smoothly Proxy (DSH SP): external DeepSeek Harness plugin — a model-provider forward proxy with per-host routing and a Settings page.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -44,7 +44,7 @@
     "postpublish": "node scripts/post-publish-check.mjs"
   },
   "engines": { "node": ">=18" },
-  "keywords": ["deepseek-harness", "dsh", "plugin", "proxy", "model-provider", "settings"],
+  "keywords": ["deepseek-harness", "dsh", "plugin", "proxy", "model-provider", "settings", "smoothly-proxy", "sp"],
   "author": "karoc",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/karoc/dsh-proxy.git" },

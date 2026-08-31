@@ -1,11 +1,12 @@
 /**
- * Copy dictionaries for the Proxy settings section. English is the key source
- * (en object keyed by the same strings), zh must carry every key.
+ * Copy dictionaries for the Proxy settings section (DSH Smoothly Proxy / DSH SP).
+ * English is the key source (en object keyed by the same strings), zh must
+ * carry every key.
  */
 
 export const en = {
   nav: 'Proxy',
-  title: 'Proxy settings',
+  title: 'DSH Smoothly Proxy (DSH SP)',
   subtitle: 'Model-provider traffic through an optional upstream proxy, per host.',
   upstreamTitle: 'Upstream proxy (optional)',
   upstreamEnabled: 'Enable upstream proxy (when off, every host connects directly)',
@@ -44,7 +45,7 @@ export const en = {
 
 export const zh: Record<keyof typeof en, string> = {
   nav: '代理',
-  title: '代理设置',
+  title: 'DSH Smoothly Proxy（DSH SP）',
   subtitle: '按主机把模型提供方流量转发到可选的上游代理。',
   upstreamTitle: '上游代理（可选）',
   upstreamEnabled: '启用上游代理（未启用时所有主机直连）',

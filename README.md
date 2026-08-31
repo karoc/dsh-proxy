@@ -1,4 +1,4 @@
-# dsh-proxy
+# DSH Smoothly Proxy (DSH SP)
 
 English | [简体中文](README.zh.md)
 
@@ -6,9 +6,9 @@ English | [简体中文](README.zh.md)
 [![npm downloads](https://img.shields.io/npm/dm/@karoc/dsh-proxy.svg)](https://www.npmjs.com/package/@karoc/dsh-proxy)
 [![license MIT](https://img.shields.io/npm/l/@karoc/dsh-proxy.svg)](LICENSE)
 
-An **external** DeepSeek Harness plugin: a model-provider **forward proxy** with
-**per-host routing**, plus a **Settings page** dedicated to model-provider
-proxying.
+DSH Smoothly Proxy (**DSH SP**) is an **external** DeepSeek Harness plugin: a
+model-provider **forward proxy** with **per-host routing**, plus a **Settings
+page** dedicated to model-provider proxying.
 
 It runs a loopback forward proxy inside the dsh host process, points the
 process's egress traffic at it (`HTTP(S)_PROXY` + `NODE_USE_ENV_PROXY`), and
