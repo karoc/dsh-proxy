@@ -1,5 +1,5 @@
 /**
- * dsh-proxy host half (DSH Smoothly Proxy / DSH SP): starts the loopback
+ * dsh-proxy host half (Smoothly Proxy / 思磨力代理插件): starts the loopback
  * forward proxy, points the process's egress traffic at it, and serves the
  * /proxy/api route the settings page reads and writes.
  *

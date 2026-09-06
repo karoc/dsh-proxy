@@ -1,5 +1,5 @@
 /**
- * Proxy settings plugin (DSH Smoothly Proxy / DSH SP), browser half (external,
+ * Proxy settings plugin (Smoothly Proxy / 思磨力代理插件), browser half (external,
  * not part of the DSH repository). Registers a Settings page that configures
  * the loopback forward proxy for model providers (upstream proxy + per-host
  * routing), reading and writing <DSH_HOME>/proxy.json through the host half's
@@ -8,11 +8,16 @@
  * it.
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+// Canonical client-half context type: the removed dsh-client-runtime package
+// no longer provides ClientContext; cordis Context is the client apply type
+// (matches the built-in ui-* plugins).
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the shell's SlotMap merge (the 'settings.section' entry).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+// Type-only: pulls the slot service's Context merge (ctx.slots) into this program.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { ProxySection, type ProxySectionInjected } from './ProxySection.tsx'
 // Side-effect import: injects the design-token styles at module evaluation
 // (module-top-level side effects survive tree-shaking, unlike a closure-only

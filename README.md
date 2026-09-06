@@ -1,4 +1,4 @@
-# DSH Smoothly Proxy (DSH SP)
+# Smoothly Proxy (思磨力代理插件)
 
 English | [简体中文](README.zh.md)
 
@@ -6,9 +6,9 @@ English | [简体中文](README.zh.md)
 [![npm downloads](https://img.shields.io/npm/dm/@karoc/dsh-proxy.svg)](https://www.npmjs.com/package/@karoc/dsh-proxy)
 [![license MIT](https://img.shields.io/npm/l/@karoc/dsh-proxy.svg)](LICENSE)
 
-DSH Smoothly Proxy (**DSH SP**) is an **external** DeepSeek Harness plugin: a
-model-provider **forward proxy** with **per-host routing**, plus a **Settings
-page** dedicated to model-provider proxying.
+**Smoothly Proxy** (**思磨力代理** / Smoothly) is an **external** DeepSeek
+Harness plugin: a model-provider **forward proxy** with **per-host routing**,
+plus a **Settings page** dedicated to model-provider proxying.
 
 It runs a loopback forward proxy inside the dsh host process, points the
 process's egress traffic at it (`HTTP(S)_PROXY` + `NODE_USE_ENV_PROXY`), and
@@ -29,8 +29,8 @@ desktop shell had.
 
 ## What it adds
 
-A new Settings section, **「代理 / Proxy」**, placed after the built-in
-**Models** and **Model reasoning** pages. It shows:
+A new Settings section, **「思磨力代理 / Smoothly Proxy」**, placed after the
+built-in **Models** and **Model reasoning** pages. It shows:
 
 - an **upstream proxy card**: enable toggle, protocol selector (HTTP / HTTPS /
   SOCKS5), host, port, optional username/password, and a **Test connection**
@@ -104,7 +104,7 @@ The package is published to npm as `@karoc/dsh-proxy`:
 dsh plugin --profile web add @karoc/dsh-proxy
 ```
 
-This installs the prebuilt bundle and appends it to the `web` profile. Then **restart `dsh web`** and open **Settings → 代理 / Proxy**.
+This installs the prebuilt bundle and appends it to the `web` profile. Then **restart `dsh web`** and open **Settings → 思磨力代理 / Smoothly Proxy**.
 
 ### From git
 

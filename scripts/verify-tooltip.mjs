@@ -4,6 +4,7 @@
 // the plugin's custom Tooltip bubble (role="tooltip", no native title), and
 // short labels stay quiet. Run: node scripts/verify-tooltip.mjs
 import { chromium } from 'playwright'
+import { mintBrowserCookie } from './lib/auth-cookie.mjs'
 
 const ORIGIN = process.env.DSH_GUI_ORIGIN ?? 'http://127.0.0.1:3080'
 const browser = await chromium.launch()
@@ -19,6 +20,7 @@ try {
   page.on('pageerror', (e) => errors.push(String(e)))
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
 
+  await page.context().addCookies([{ ...mintBrowserCookie(), domain: '127.0.0.1', path: '/' }])
   await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3000)
   await page.evaluate(() => {
@@ -27,7 +29,7 @@ try {
   })
   await page.waitForTimeout(900)
   await page.evaluate(() => {
-    const el = [...document.querySelectorAll('span')].find((s) => (s.textContent ?? '').trim() === 'Proxy' && (s.className ?? '').toString().includes('navLabel'))
+    const el = [...document.querySelectorAll('span')].find((s) => (s.textContent ?? '').trim() === 'Smoothly Proxy' && (s.className ?? '').toString().includes('navLabel'))
     el?.click()
   })
   await page.waitForTimeout(1500)

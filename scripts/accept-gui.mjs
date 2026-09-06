@@ -3,12 +3,13 @@
  * GUI acceptance for dsh-proxy: verifies, against the LIVE dsh web GUI:
  *   1. the plugin client bundle is served (/plugins/dsh-proxy/client.js 200)
  *   2. the /proxy/api route is live (host half registered it)
- *   3. the Settings page shows a "代理 / Proxy" section entry
+ *   3. the Settings page shows a "思磨力代理 / Smoothly Proxy" section entry
  *
  * Run AFTER restarting dsh web (the plugin set is only scanned at startup).
  * Requires Playwright (chromium). `pnpm accept` / `node scripts/accept-gui.mjs`.
  */
 import { chromium } from 'playwright'
+import { mintBrowserCookie } from './lib/auth-cookie.mjs'
 
 const ORIGIN = process.env.DSH_GUI_ORIGIN ?? 'http://127.0.0.1:3080'
 const results = []
@@ -17,12 +18,33 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? '✔' : '✘'} ${name}${detail ? ` — ${detail}` : ''}`)
 }
 
-// 1. bundle served (host endpoint).
-try {
-  const res = await fetch(`${ORIGIN}/plugins/dsh-proxy/client.js`)
-  check('plugin client bundle served', res.ok, `HTTP ${res.status}`)
-} catch (e) {
-  check('plugin client bundle served', false, e.message)
+// 1. bundle served (host endpoint). On dsh ≥ 0.1.3 external bundles are
+//    served under the boot manifest's scoped id with a rev query
+//    (/plugins/??@karoc/dsh-proxy/client.js&rev=<rev>); resolve the entry URL
+//    from the boot HTML exactly as the GUI does, then fetch it.
+const bundleUrl = await (async () => {
+  try {
+    const cookie = mintBrowserCookie()
+    const html = await (await fetch(ORIGIN, { headers: { cookie: `${cookie.name}=${cookie.value}` } })).text()
+    const idx = html.indexOf('__DSH_BOOT__')
+    const chunk = idx >= 0 ? html.slice(idx, idx + 200000) : ''
+    const match = chunk.match(/\{"id":"@karoc\/dsh-proxy","url":"([^"]+)"/)
+    return match ? match[1] : null
+  } catch {
+    return null
+  }
+})()
+if (bundleUrl === null) {
+  check('plugin client bundle served', false, 'could not resolve bundle URL from boot manifest')
+} else {
+  try {
+    const cookie = mintBrowserCookie()
+    const res = await fetch(`${ORIGIN}${bundleUrl}`, { headers: { cookie: `${cookie.name}=${cookie.value}` } })
+    const text = await res.text()
+    check('plugin client bundle served', res.ok && text.length > 0, `HTTP ${res.status}, ${text.length} bytes`)
+  } catch (e) {
+    check('plugin client bundle served', false, e.message)
+  }
 }
 
 // 2. /proxy/api route live (host half).
@@ -44,11 +66,14 @@ try {
     if (msg.type() === 'error') pageErrors.push(msg.text())
   })
 
+  // dsh web (0.1.3+) gates the GUI behind a browser-session cookie; mint one
+  // from the persisted signing secret so the nav checks see the live UI.
+  await page.context().addCookies([{ ...mintBrowserCookie(), domain: '127.0.0.1', path: '/' }])
   await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' })
   // Give the client bundles a moment to register slots.
   await page.waitForTimeout(2500)
 
-  // Open Settings, then look for the Proxy nav label inside the panel.
+  // Open Settings, then look for the Smoothly Proxy nav label inside the panel.
   await page.evaluate(() => {
     const btn = [...document.querySelectorAll('button')].find((b) => /^Settings$/.test((b.textContent ?? '').trim()))
     btn?.click()
@@ -59,7 +84,7 @@ try {
       .filter((s) => (s.className ?? '').toString().includes('navLabel'))
       .map((s) => (s.textContent ?? '').trim())
   })
-  check('settings nav shows Proxy entry', found.includes('Proxy'), found.join(' | ') || 'not found')
+  check('settings nav shows Smoothly Proxy entry', found.includes('Smoothly Proxy'), found.join(' | ') || 'not found')
 
   // Also confirm no slot-entry crash on the page.
   const slotCrash = pageErrors.some((e) => /slot entry crashed/.test(e))

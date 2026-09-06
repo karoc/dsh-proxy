@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.3]
+
+- **Brand name**: Smoothly Proxy / 思磨力代理插件 — the plugin's user-visible
+  identity is now standardized: 品牌英文 **Smoothly**，品牌中文 **思磨力**，英文名
+  **Smoothly Proxy**（简称同），中文名 **思磨力代理插件**（简称 **思磨力代理**）。
+  Applied to the READMEs, settings page title, settings nav label
+  (思磨力代理 / Smoothly Proxy), package description, and source header
+  comments. The technical identity is untouched: npm package
+  `@karoc/dsh-proxy`, runtime id `dsh-proxy`, CSS prefix, and `/proxy/api`
+  route all stay as-is so installed profiles need no re-install.
+
 ## [0.1.2]
 
 - **Brand name**: DSH Smoothly Proxy (DSH SP) — used in the README, settings page title, and changelog.

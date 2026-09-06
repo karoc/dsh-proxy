@@ -4,6 +4,9 @@ node_modules/
 # Build output
 lib/
 *.tsbuildinfo
+# …but scripts/lib is source (GUI-verify helpers), not build output
+!scripts/lib/
+!scripts/lib/*.mjs
 
 # npm / pnpm artifacts
 *.tgz

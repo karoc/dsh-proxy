@@ -1,5 +1,5 @@
 /**
- * The "Proxy" settings section (external plugin).
+ * The "Smoothly Proxy" settings section (external plugin).
  *
  * A companion page to the built-in Models page: it configures a loopback
  * forward proxy that routes model-provider traffic (and any other selected

@@ -1,4 +1,4 @@
-# DSH Smoothly Proxy（DSH SP）
+# 思磨力代理插件（Smoothly Proxy）
 
 [English](README.md) | 简体中文
 
@@ -6,7 +6,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@karoc/dsh-proxy.svg)](https://www.npmjs.com/package/@karoc/dsh-proxy)
 [![license MIT](https://img.shields.io/npm/l/@karoc/dsh-proxy.svg)](LICENSE)
 
-DSH Smoothly Proxy（**DSH SP**）是一个**外部** DeepSeek Harness 插件：为**模型提供方**提供带**按主机路由**的**正向代理**，并附带一个专职设置页。
+**思磨力代理插件**（**Smoothly Proxy** / 思磨力）是一个**外部** DeepSeek Harness 插件：为**模型提供方**提供带**按主机路由**的**正向代理**，并附带一个专职设置页。
 
 它在 dsh host 进程内启动一个 loopback 正向代理，把进程的出站流量指向它（`HTTP(S)_PROXY` + `NODE_USE_ENV_PROXY`），**只把你在设置页勾选的主机**转发到可选的上游代理（HTTP / HTTPS / SOCKS5，支持可选 Basic 认证），其余全部直连。模型提供方主机从你的 dsh `settings.yaml` 读取，流量中观测到的主机也会被收集——两者都以复选框形式出现。
 
@@ -16,7 +16,7 @@ DSH Smoothly Proxy（**DSH SP**）是一个**外部** DeepSeek Harness 插件：
 
 ## 它新增了什么
 
-一个放在内置 **Models** 与 **Model reasoning** 页之后的新设置项 **「代理 / Proxy」**，包含：
+一个放在内置 **Models** 与 **Model reasoning** 页之后的新设置项 **「思磨力代理 / Smoothly Proxy」**，包含：
 
 - **上游代理卡片**：启用开关、协议选择（HTTP / HTTPS / SOCKS5）、主机、端口、可选用户名/密码，以及**测试连接**按钮（验证上游是否会说对应协议）；
 - **模型提供方**列表——从你的 dsh `settings.yaml` 读取的主机（`llm-deepseek.baseURL`、`llm-pi-ai.providers.<n>.baseURL`、任意 `llm-*` 命名空间），有友好显示名时以显示名标注；
@@ -78,7 +78,7 @@ dsh host 进程
 dsh plugin --profile web add @karoc/dsh-proxy
 ```
 
-安装预构建 bundle 并追加到 `web` profile。然后**重启 `dsh web`**，打开 **设置 → 代理 / Proxy**。
+安装预构建 bundle 并追加到 `web` profile。然后**重启 `dsh web`**，打开 **设置 → 思磨力代理 / Smoothly Proxy**。
 
 ### 从 git 安装
 
