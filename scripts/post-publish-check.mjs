@@ -28,6 +28,9 @@
  *
  * Checks (after the version becomes visible):
  *   1. `dist-tags.latest` on the registry equals package.json version
+ *      (POLLED like version visibility — npm writes the version document
+ *      first and flips `latest` moments later, so a single snapshot right
+ *      after upload can read the previous tag even when the publish was fine)
  *   2. the published tarball contains every expected file
  *
  * Like every lifecycle script, it is skipped by `npm publish --ignore-scripts`
@@ -109,16 +112,35 @@ if (visible) {
   process.exit(1)
 }
 
-// 1. dist-tags.latest matches the published version.
-let latest
-try {
-  const pkgDoc = await fetchRegistryJson(encodedName)
-  const distTags = (pkgDoc?.['dist-tags'] ?? {})
-  latest = typeof distTags.latest === 'string' ? distTags.latest : undefined
-  if (latest === undefined) problems.push(`dist-tags has no "latest" (got: ${JSON.stringify(distTags)})`)
-  else if (latest !== version) problems.push(`registry "latest" is ${latest}, expected ${version}`)
-} catch (error) {
-  problems.push(`could not read dist-tags: ${error.message}`)
+// 1. dist-tags.latest matches the published version. This is ALSO an
+//    eventual-consistency surface — npm writes the version document first and
+//    flips `latest` moments later (real incident: "latest is 0.1.2, expected
+//    0.1.3" right after a successful publish), so poll it at the same cadence
+//    as version visibility instead of trusting a single snapshot.
+let latest = undefined
+let distTags = {}
+let lastDistTagError = undefined
+for (let attempt = 0; attempt <= POLL_ATTEMPTS; attempt += 1) {
+  if (attempt > 0) {
+    console.log(`   (dist-tag "latest" not yet ${version} — registry tag update catching up; retry ${attempt}/${POLL_ATTEMPTS})`)
+    await sleep(POLL_INTERVAL_MS)
+  }
+  try {
+    const pkgDoc = await fetchRegistryJson(encodedName)
+    distTags = pkgDoc?.['dist-tags'] ?? {}
+    latest = typeof distTags.latest === 'string' ? distTags.latest : undefined
+  } catch (error) {
+    // Probe failure — keep polling rather than failing on a transient blip.
+    lastDistTagError = error
+  }
+  if (latest === version) break
+}
+if (latest === undefined) {
+  problems.push(lastDistTagError
+    ? `could not read dist-tags: ${lastDistTagError.message}`
+    : `dist-tags has no "latest" (got: ${JSON.stringify(distTags)})`)
+} else if (latest !== version) {
+  problems.push(`registry "latest" is ${latest}, expected ${version} — if this publish used an explicit --tag, the mismatch is expected; otherwise check the dist-tag`)
 }
 if (latest === version) console.log('✅ dist-tags.latest matches the published version')
 
