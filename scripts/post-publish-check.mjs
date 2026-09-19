@@ -4,171 +4,361 @@
  * package has been uploaded.
  *
  * It CANNOT prevent a bad publish — the upload already happened. Its job is to
- * confirm the release actually landed on the registry, with a loud alarm only
- * when something is genuinely wrong.
+ * confirm the release actually landed, with a loud alarm only when something is
+ * genuinely wrong. Because postpublish only runs after npm's upload PUT
+ * succeeded, "the index has not caught up yet" must never be reported as a
+ * failure: a false failure here made a successful 0.1.0 publish look broken on
+ * 2026-09-19 (the version document only became visible ~4 minutes after the
+ * upload; a 60s window gave up first).
  *
- * Registry eventual consistency: right after upload the registry answers
- * "Your package is being processed and may take a few minutes to become
- * available" — the version document can 404 for several MINUTES while the
- * index catches up (observed ~4 min for @karoc/dsh-proxy 0.1.1). This script
- * polls for up to 5 minutes before judging.
+ * Grading rules (frozen remediation plan v6 §2):
+ *   FATAL (exit 1):
+ *     1. the tarball answers HTTP 404 / other 4xx (407 excepted) after one retry;
+ *     2. the tarball body is not gzip after one retry;
+ *     3. the listing (obtained with tar exit 0) is empty or misses an expected
+ *        entry;
+ *     4. the version document AND the package document both answer a definite
+ *        404 after the polling budget.
+ *   NON-FATAL (warn, exit 0):
+ *     transport failures (DNS/connect/timeout/no curl), HTTP 5xx / 407,
+ *     unavailable dist-tags, a `latest` tag that lags or points elsewhere, a
+ *     lib/index.js checksum difference, and every "index still catching up"
+ *     outcome.
  *
- * All registry reads go through `fetch` directly (no `npm view` subprocess):
- * npm CLI prints a full multi-line E404 error block for every probe of a
- * not-yet-visible version, which drowns the publish output in 404s even when
- * everything is working. Polling here prints a short progress line instead.
+ * Registry resolution (B4): DSH_POSTPUBLISH_REGISTRY_BASE → npm_config_registry
+ * → ./.npmrc → $NPM_CONFIG_USERCONFIG (or ~/.npmrc) → package.json
+ * publishConfig.registry → https://registry.npmjs.org. The effective value and
+ * its source are printed.
  *
- * Timeout semantics: postpublish runs ONLY after the upload succeeded, so a
- * version that stays invisible is almost always index lag, not a failed
- * publish. The script therefore distinguishes:
- *   - package document visible (any version) → the package IS on the registry;
- *     the new version is just not indexed yet → treat as published (exit 0)
- *     with a clear "verify manually, do not re-publish" note;
- *   - package document also 404 → genuinely unconfirmed → exit 1.
+ * Test seams (B7; production defaults unchanged when unset):
+ *   DSH_POSTPUBLISH_REGISTRY_BASE, DSH_POSTPUBLISH_ATTEMPTS,
+ *   DSH_POSTPUBLISH_INTERVAL_MS, DSH_POSTPUBLISH_TARBALL_TIMEOUT_MS.
  *
- * Checks (after the version becomes visible):
- *   1. `dist-tags.latest` on the registry equals package.json version
- *      (POLLED like version visibility — npm writes the version document
- *      first and flips `latest` moments later, so a single snapshot right
- *      after upload can read the previous tag even when the publish was fine)
- *   2. the published tarball contains every expected file
- *
- * Like every lifecycle script, it is skipped by `npm publish --ignore-scripts`
- * (documented in CONTRIBUTING.md).
+ * Like every lifecycle script, it is skipped by `npm publish --ignore-scripts`.
  */
-import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { execSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const firstLine = (text) => String(text ?? '').split('\n')[0]
 
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const { name, version } = pkg
-const problems = []
 const encodedName = encodeURIComponent(name)
 const encodedVersion = encodeURIComponent(version)
 
-console.log(`post-publish-check: ${name}@${version}`)
+const problems = []
+const warnings = []
 
-/** Fetch a registry JSON document; null when the resource 404s (not visible). */
-async function fetchRegistryJson(path) {
-  const response = await fetch(`https://registry.npmjs.org/${path}`, { signal: AbortSignal.timeout(10000) })
-  if (response.status === 404) return null
-  if (!response.ok) throw new Error(`registry returned HTTP ${response.status} for ${path}`)
-  return await response.json()
+/** Parse a positive integer env seam, falling back to the production default. */
+function positiveInt(raw, fallback) {
+  const value = Number.parseInt(String(raw ?? ''), 10)
+  return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
-/** True once the version document stops 404-ing (index caught up). */
-async function versionVisible() {
-  const doc = await fetchRegistryJson(`${encodedName}/${encodedVersion}`)
-  return doc !== null && typeof doc.version === 'string'
-}
+const ATTEMPTS = positiveInt(process.env.DSH_POSTPUBLISH_ATTEMPTS, 100)
+const INTERVAL_MS = positiveInt(process.env.DSH_POSTPUBLISH_INTERVAL_MS, 3000)
+const TAG_ATTEMPTS = Math.min(ATTEMPTS, 20)
+const TARBALL_TIMEOUT_MS = positiveInt(process.env.DSH_POSTPUBLISH_TARBALL_TIMEOUT_MS, 20000)
+const MAX_BUFFER = 8 * 1024 * 1024
 
-/** Fetch the package-level document (any version visible?) — the stronger signal. */
-async function packageVisible() {
-  const doc = await fetchRegistryJson(encodedName)
-  return doc !== null && typeof doc === 'object'
-}
-
-// Poll until the published version is visible in the registry index.
-// npm's own message says indexing "may take a few minutes", so allow 5 min.
-const POLL_INTERVAL_MS = 3000
-const POLL_ATTEMPTS = 100 // up to ~5 minutes of waiting
-let visible = false
-try { visible = await versionVisible() } catch { /* probe failure — keep polling */ }
-for (let attempt = 1; !visible && attempt <= POLL_ATTEMPTS; attempt += 1) {
-  if (attempt % 10 === 1 || attempt === POLL_ATTEMPTS) {
-    console.log(`   (version ${version} not visible yet — registry index catching up; retry ${attempt}/${POLL_ATTEMPTS})`)
+/** `registry = <url>` from one .npmrc, normalized (trailing slashes removed). */
+function npmrcRegistry(file) {
+  try {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const match = /^\s*registry\s*=\s*(.+?)\s*$/.exec(line)
+      if (match) return match[1].replace(/\/+$/, '')
+    }
+  } catch {
+    // absent or unreadable — not a candidate
   }
-  await sleep(POLL_INTERVAL_MS)
-  try { visible = await versionVisible() } catch { /* probe failure — keep polling */ }
+  return undefined
+}
+
+/** Resolve the registry base URL and where it came from (B4). */
+function resolveRegistry() {
+  const candidates = []
+  const seam = (process.env.DSH_POSTPUBLISH_REGISTRY_BASE ?? '').trim()
+  if (seam !== '') candidates.push([seam.replace(/\/+$/, ''), 'DSH_POSTPUBLISH_REGISTRY_BASE'])
+  const fromEnv = (process.env.npm_config_registry ?? '').trim()
+  if (fromEnv !== '') candidates.push([fromEnv.replace(/\/+$/, ''), 'npm_config_registry'])
+  const local = npmrcRegistry(join(root, '.npmrc'))
+  if (local !== undefined) candidates.push([local, './.npmrc'])
+  const userFile = process.env.NPM_CONFIG_USERCONFIG ?? join(homedir(), '.npmrc')
+  const user = npmrcRegistry(userFile)
+  if (user !== undefined) candidates.push([user, userFile])
+  const declared = typeof pkg.publishConfig?.registry === 'string' ? pkg.publishConfig.registry.trim() : ''
+  if (declared !== '') candidates.push([declared.replace(/\/+$/, ''), 'package.json publishConfig.registry'])
+  const [base, source] = candidates[0] ?? ['https://registry.npmjs.org', 'default']
+  return { base, source }
+}
+
+const registry = resolveRegistry()
+
+console.log(`post-publish-check: ${name}@${version}`)
+console.log(`post-publish-check: registry ${registry.base} (source: ${registry.source})`)
+if (registry.source === 'DSH_POSTPUBLISH_REGISTRY_BASE' || registry.source === 'npm_config_registry') {
+  console.log(`post-publish-check: ⚠️  not the default registry — verifying against an override`)
+}
+
+/** Three-state registry probe (D19/D25). */
+async function probe(path, timeoutMs = 10000) {
+  try {
+    const response = await fetch(`${registry.base}/${path}`, { signal: AbortSignal.timeout(timeoutMs) })
+    if (response.status === 404) return { kind: 'absent' }
+    if (!response.ok) return { kind: 'unknown', error: new Error(`HTTP ${response.status}`) }
+    return { kind: 'data', doc: await response.json() }
+  } catch (error) {
+    return { kind: 'unknown', error }
+  }
+}
+
+// 1. Poll the version document. A definite 404 is remembered separately from
+//    probe failures: only "both the version and the package document answered a
+//    definite 404" may fail the run.
+let visible = false
+let sawVersionAbsent = false
+for (let attempt = 0; attempt <= ATTEMPTS && !visible; attempt += 1) {
+  if (attempt > 0) {
+    if (attempt === 1 || attempt % 10 === 0 || attempt === ATTEMPTS) {
+      console.log(`   (version not visible yet — registry index catching up; retry ${attempt}/${ATTEMPTS})`)
+    }
+    await sleep(INTERVAL_MS)
+  }
+  const result = await probe(`${encodedName}/${encodedVersion}`)
+  if (result.kind === 'data' && typeof result.doc?.version === 'string') visible = true
+  else if (result.kind === 'absent') sawVersionAbsent = true
+}
+
+const packageProbe = await probe(encodedName)
+if (visible) {
+  console.log(`✅ version ${version} is visible on the registry`)
+} else if (sawVersionAbsent && packageProbe.kind === 'absent') {
+  problems.push(
+    `${name}@${version} answered a definite 404 for both the version and the package document `
+    + `after ~${Math.round((ATTEMPTS * INTERVAL_MS) / 1000)}s of polling — the upload did not land`,
+  )
+} else {
+  // Index lag, an unreadable probe, or a package that exists without this
+  // version yet: none of these may fail an already-uploaded release.
+  const observed = packageProbe.kind === 'data' && typeof packageProbe.doc?.['dist-tags']?.latest === 'string'
+    ? packageProbe.doc['dist-tags'].latest
+    : undefined
+  warnings.push(
+    `version ${version} is not indexed yet after ~${Math.round((ATTEMPTS * INTERVAL_MS) / 1000)}s`
+    + (packageProbe.kind === 'data'
+      ? ` (the package document is live${observed === undefined ? '' : `, latest ${observed}`}) — the upload landed, the index is still catching up`
+      : ' (the package document could not be read either — probe failures are not treated as absence)'),
+  )
+}
+
+// 2. dist-tags are ADVISORY (D11): npm itself refuses to publish a lower
+//    version under the default `latest` tag, so after a successful upload a
+//    mismatch can only be tag-propagation lag — never a failed publish.
+if (visible) {
+  let latest
+  for (let attempt = 0; attempt <= TAG_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      if (attempt === 1 || attempt % 10 === 0) {
+        console.log(`   (dist-tag "latest" not yet ${version} — tag update catching up; retry ${attempt}/${TAG_ATTEMPTS})`)
+      }
+      await sleep(INTERVAL_MS)
+    }
+    const result = await probe(encodedName)
+    if (result.kind === 'data') {
+      const tag = result.doc?.['dist-tags']?.latest
+      latest = typeof tag === 'string' ? tag : undefined
+      if (latest === version) break
+    }
+  }
+  if (latest === version) {
+    console.log('✅ dist-tags.latest matches the published version')
+  } else {
+    warnings.push(`dist-tags.latest ${describeTag(latest, version)}`)
+  }
+}
+
+/** Numeric x.y.z comparison; undefined when either side is not three-part. */
+function compareVersions(left, right) {
+  const parse = (value) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(value))
+    return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3])]
+  }
+  const a = parse(left)
+  const b = parse(right)
+  if (a === undefined || b === undefined) return undefined
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1
+  }
+  return 0
+}
+
+function describeTag(latest, expected) {
+  if (latest === undefined) return `could not be read (expected ${expected}) — advisory only`
+  const order = compareVersions(latest, expected)
+  if (order === undefined) return `is "${latest}" (not x.y.z) while this release is ${expected} — advisory only`
+  if (order < 0) return `is ${latest}, lower than this release (${expected}) — it may still be catching up; if it stays lower, users install ${latest}`
+  if (order > 0) return `is ${latest}, higher than this release (${expected}) — a newer version exists`
+  return `differs from this release (${expected}) — advisory only`
+}
+
+// 3. Tarball contents: httpx/gzip problems are graded, transport problems are
+//    never fatal (the upload already succeeded), and a tar that cannot read the
+//    stream counts as transport, not as a content mismatch.
+function expectedEntries(manifest) {
+  const files = Array.isArray(manifest.files) ? manifest.files.filter((entry) => typeof entry === 'string') : []
+  const entries = files.map((entry) => entry.replace(/^\.\//, ''))
+  if (!entries.includes('package.json')) entries.push('package.json')
+  return entries
+}
+
+function listingHasEntry(listing, entry) {
+  if (entry.includes('*')) {
+    const prefix = entry.slice(0, entry.indexOf('*')).replace(/\/$/, '')
+    return prefix === '' ? true : listing.some((line) => line.startsWith(`package/${prefix}`))
+  }
+  if (entry.endsWith('/')) {
+    return listing.some((line) => line.startsWith(`package/${entry}`))
+  }
+  return listing.includes(`package/${entry}`)
+}
+
+async function downloadTarball(url) {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(TARBALL_TIMEOUT_MS) })
+    if (!response.ok) return { kind: 'http', status: response.status }
+    const buffer = Buffer.from(await response.arrayBuffer())
+    if (buffer.length < 2 || buffer[0] !== 0x1f || buffer[1] !== 0x8b) return { kind: 'not-gzip' }
+    return { kind: 'ok', buffer }
+  } catch (error) {
+    return { kind: 'transport', error }
+  }
+}
+
+function curlTarball(url) {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-postpublish-'))
+  const body = join(dir, 'body.tgz')
+  try {
+    const result = spawnSync(
+      'curl',
+      ['-fsS', '-o', body, '-w', '%{http_code}', '--max-time', String(Math.ceil(TARBALL_TIMEOUT_MS / 1000)), url],
+      { maxBuffer: MAX_BUFFER },
+    )
+    if (result.error?.code === 'ENOENT' || result.status === 127) return { kind: 'no-curl' }
+    const status = Number.parseInt(String(result.stdout ?? '').trim(), 10)
+    if (result.status === 22) return { kind: 'http', status: Number.isFinite(status) ? status : 400 }
+    if (result.status !== 0) {
+      return { kind: 'transport', error: new Error(`curl exited ${result.status}${result.status === null ? ' (killed)' : ''}`) }
+    }
+    const buffer = readFileSync(body)
+    if (buffer.length < 2 || buffer[0] !== 0x1f || buffer[1] !== 0x8b) return { kind: 'not-gzip' }
+    return { kind: 'ok', buffer }
+  } catch (error) {
+    return { kind: 'transport', error }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/** Grade a failed download: only 4xx (407 excepted) and non-gzip are fatal. */
+function gradeDownloadFailure(result) {
+  if (result.kind === 'http') {
+    const status = result.status
+    if (status === 407 || (status >= 500 && status <= 599)) {
+      return { fatal: false, reason: `HTTP ${status} from the registry/CDN` }
+    }
+    return { fatal: true, reason: `HTTP ${status} for the tarball` }
+  }
+  if (result.kind === 'not-gzip') return { fatal: true, reason: 'the tarball body is not gzip' }
+  return {
+    fatal: false,
+    reason: result.kind === 'no-curl' ? 'curl is unavailable' : `transport failure (${firstLine(result.error?.message)})`,
+  }
 }
 
 if (visible) {
-  console.log(`✅ version ${version} is visible on the registry`)
-} else {
-  // Distinguish "index lag on a live package" from "package not found at all".
-  let packageLive = false
-  try { packageLive = await packageVisible() } catch { /* probe failure */ }
-  if (packageLive) {
-    // The package document exists — the upload landed; only the version index
-    // is still catching up. Treat as published; npm itself warned processing
-    // "may take a few minutes", and postpublish only runs after the upload.
-    console.error(`\n⚠️  version ${version} is not indexed yet after 5 minutes of polling,`)
-    console.error('   but the package document IS live on the registry — the upload succeeded.')
-    console.error('   The index is still catching up (npm: "may take a few minutes").')
-    console.error(`   Verify shortly with: npm view ${name} versions`)
-    console.error(`   Do NOT re-publish ${version} — it is live or about to be.`)
-    process.exit(0)
-  }
-  console.error(`\n⚠️  ${name}@${version} did not become visible on the registry after `
-    + `${Math.round((POLL_ATTEMPTS * POLL_INTERVAL_MS) / 1000)}s of polling,`)
-  console.error('   and the package document is not visible either.')
-  console.error('   The publish may have failed before the upload completed, or the index')
-  console.error(`   is still extremely slow. Verify manually with: npm view ${name} versions`)
-  console.error(`   Do NOT re-publish ${version} without checking — it may be live.`)
-  process.exit(1)
-}
+  const versionProbe = await probe(`${encodedName}/${encodedVersion}`)
+  const tarballUrl = versionProbe.kind === 'data' ? versionProbe.doc?.dist?.tarball : undefined
+  if (typeof tarballUrl !== 'string' || tarballUrl === '') {
+    warnings.push('the registry returned no tarball URL — tarball contents were not verified')
+  } else {
+    let download = await downloadTarball(tarballUrl)
+    let grade = download.kind === 'ok' ? { fatal: false } : gradeDownloadFailure(download)
+    if (download.kind === 'transport') {
+      // curl honors proxy environment variables; node's fetch does not unless
+      // NODE_USE_ENV_PROXY is set, so a proxy-only network falls back to curl.
+      download = curlTarball(tarballUrl)
+      grade = download.kind === 'ok' ? { fatal: false } : gradeDownloadFailure(download)
+    } else if (grade.fatal) {
+      // One retry for graded failures (a truncated body or a CDN blip).
+      download = await downloadTarball(tarballUrl)
+      grade = download.kind === 'ok' ? { fatal: false } : gradeDownloadFailure(download)
+    }
 
-// 1. dist-tags.latest matches the published version. This is ALSO an
-//    eventual-consistency surface — npm writes the version document first and
-//    flips `latest` moments later (real incident: "latest is 0.1.2, expected
-//    0.1.3" right after a successful publish), so poll it at the same cadence
-//    as version visibility instead of trusting a single snapshot.
-let latest = undefined
-let distTags = {}
-let lastDistTagError = undefined
-for (let attempt = 0; attempt <= POLL_ATTEMPTS; attempt += 1) {
-  if (attempt > 0) {
-    console.log(`   (dist-tag "latest" not yet ${version} — registry tag update catching up; retry ${attempt}/${POLL_ATTEMPTS})`)
-    await sleep(POLL_INTERVAL_MS)
-  }
-  try {
-    const pkgDoc = await fetchRegistryJson(encodedName)
-    distTags = pkgDoc?.['dist-tags'] ?? {}
-    latest = typeof distTags.latest === 'string' ? distTags.latest : undefined
-  } catch (error) {
-    // Probe failure — keep polling rather than failing on a transient blip.
-    lastDistTagError = error
-  }
-  if (latest === version) break
-}
-if (latest === undefined) {
-  problems.push(lastDistTagError
-    ? `could not read dist-tags: ${lastDistTagError.message}`
-    : `dist-tags has no "latest" (got: ${JSON.stringify(distTags)})`)
-} else if (latest !== version) {
-  problems.push(`registry "latest" is ${latest}, expected ${version} — if this publish used an explicit --tag, the mismatch is expected; otherwise check the dist-tag`)
-}
-if (latest === version) console.log('✅ dist-tags.latest matches the published version')
+    if (download.kind !== 'ok') {
+      if (grade.fatal) problems.push(`could not verify the published tarball: ${grade.reason}`)
+      else warnings.push(`could not verify the published tarball: ${grade.reason} — re-run this script once the network recovers`)
+    } else {
+      const buffer = download.buffer
+      let listing
+      try {
+        listing = execSync('tar -tzf -', {
+          cwd: root, encoding: 'utf8', timeout: 25000, maxBuffer: MAX_BUFFER, input: buffer,
+        }).split('\n').filter((line) => line.trim() !== '')
+      } catch (error) {
+        warnings.push(`could not list the published tarball (${firstLine(error.message)}) — treated as transport, not as a content mismatch`)
+      }
+      if (listing !== undefined) {
+        const expected = expectedEntries(pkg)
+        const missing = expected.filter((entry) => !listingHasEntry(listing, entry))
+        if (listing.length === 0) problems.push('the published tarball listing is empty')
+        else if (missing.length > 0) problems.push(`the published tarball is missing: ${missing.join(', ')}`)
+        else console.log(`✅ published tarball contains all ${expected.length} expected entries`)
 
-// 2. The published tarball contains every expected file.
-const EXPECTED = ['lib/index.js', 'lib/client.js', 'cordis.patch.yml', 'README.md', 'README.zh.md', 'LICENSE', 'package.json']
-try {
-  const versionDoc = await fetchRegistryJson(`${encodedName}/${encodedVersion}`)
-  const tarball = versionDoc?.dist?.tarball
-  if (typeof tarball !== 'string' || tarball === '') throw new Error('registry returned no tarball URL')
-  const listing = execSync(`curl -s --max-time 20 ${JSON.stringify(tarball)} | tar -tzf -`, {
-    cwd: root, encoding: 'utf8', timeout: 25000,
-  })
-  for (const file of EXPECTED) {
-    if (!listing.includes(`package/${file}`)) problems.push(`published tarball is missing package/${file}`)
+        const localLib = join(root, 'lib/index.js')
+        if (existsSync(localLib) && listing.includes('package/lib/index.js')) {
+          try {
+            const published = execSync('tar -xzOf - package/lib/index.js', {
+              cwd: root, maxBuffer: MAX_BUFFER, timeout: 25000, input: buffer,
+            })
+            const publishedHash = createHash('sha256').update(published).digest('hex')
+            const localHash = createHash('sha256').update(readFileSync(localLib)).digest('hex')
+            if (publishedHash === localHash) {
+              console.log(`✅ published lib/index.js matches this tree (sha256 ${localHash.slice(0, 12)}…)`)
+            } else {
+              warnings.push(
+                `published lib/index.js (sha256 ${publishedHash.slice(0, 12)}…) differs from this tree `
+                + `(${localHash.slice(0, 12)}…) — expected when a tarball packed elsewhere was published`,
+              )
+            }
+          } catch (error) {
+            warnings.push(`could not compare lib/index.js checksums: ${firstLine(error.message)}`)
+          }
+        }
+      }
+    }
   }
-  const allPresent = EXPECTED.every((file) => listing.includes(`package/${file}`))
-  if (allPresent) console.log('✅ published tarball contains all expected files')
-} catch (error) {
-  problems.push(`could not inspect published tarball: ${error.message}`)
 }
 
 if (problems.length > 0) {
-  console.error('\n⚠️  post-publish-check found problems:')
-  for (const p of problems) console.error(`   - ${p}`)
-  console.error(`\n   IMPORTANT: ${name}@${version} IS on the registry — the publish itself`)
-  console.error('   completed. These are POST-publish findings; do NOT re-publish the same version.')
-  console.error('   Fix the cause and address it in the next release.')
+  console.error('\n❌ post-publish-check FAILED:')
+  for (const problem of problems) console.error(`   - ${problem}`)
+  console.error(`\n   ${name}@${version} may or may not be live — verify before re-publishing:`)
+  console.error(`   node ${join('scripts', 'post-publish-check.mjs')}  (re-runs these checks)`)
   process.exit(1)
+}
+
+if (warnings.length > 0) {
+  console.log('\n⚠️  post-publish-check passed with warnings (none of these fail an uploaded release):')
+  for (const warning of warnings) console.log(`   - ${warning}`)
+  console.log(`\n   Re-run to complete the checks once the index catches up:`)
+  console.log(`   node ${join('scripts', 'post-publish-check.mjs')}`)
+  process.exit(0)
 }
 
 console.log('\n✅ post-publish-check passed: release is live and consistent on npm.')

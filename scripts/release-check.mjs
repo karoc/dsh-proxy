@@ -27,6 +27,7 @@
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { execSync } from 'node:child_process'
+import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -161,32 +162,98 @@ if (stale.length > 0) {
   fail(`build output is stale (src/ newer than ${stale.join(', ')}) — run pnpm bundle first`)
 }
 
-// 8. not already published (best effort; offline or 404 means not published).
-try {
-  const published = run(`npm view ${JSON.stringify('@karoc/dsh-proxy')}@${version} version`)
-  if (published.length > 0) fail(`version ${version} is already published on npm (${published}) — bump the version`)
-} catch {
-  // E404 or network failure: treated as "not published yet"
+// 8. not already published — probed DIRECTLY against the registry index with
+// the built-in fetch (never the npm CLI: `npm view <pkg>@<missing>` prints a
+// 9-line E404 block per probe, which once drowned a successful publish in
+// 404s). The FULL package document is read, not the version endpoint: that
+// endpoint intermittently answers HTTP 406 for the abbreviated-metadata accept
+// header even for long-published versions, which would misread an
+// already-published version as "safe to publish".
+//
+// Grading: a definite 404 (or a 200 without this version) means unpublished;
+// any other non-2xx answer or a transport failure BLOCKS the release after two
+// bounded retries — "the probe failed" must never read as "safe to publish".
+// DSH_RELEASE_ALLOW_REGISTRY_UNREACHABLE=1 is the deliberate override.
+
+/** `registry = <url>` from one .npmrc, normalized (trailing slashes removed). */
+function npmrcRegistry(file) {
+  try {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const match = /^\s*registry\s*=\s*(.+?)\s*$/.exec(line)
+      if (match) return match[1].replace(/\/+$/, '')
+    }
+  } catch {
+    // absent or unreadable — not a candidate
+  }
+  return undefined
 }
 
-// 9. the publish command chain is executable: prepublishOnly runs `tsdown`,
-//    which npm resolves from node_modules/.bin (npm puts that dir on PATH
-//    for lifecycle scripts). A project that was never really installed
-//    (no .bin/tsdown) would fail mid-publish with `tsdown: not found` —
-//    catch that BEFORE the publish starts. We resolve via PATH exactly like
-//    the lifecycle runner does, so custom modules dirs also work.
-let tsdownBin = ''
-try {
-  tsdownBin = execSync('command -v tsdown || true', { cwd: root, encoding: 'utf8', shell: '/bin/sh' }).trim()
-} catch { /* empty PATH lookup — treated as missing below */ }
-if (tsdownBin === '') {
-  fail('tsdown is not resolvable from PATH — the project has no installed devDependencies; run `pnpm install` first (prepublishOnly runs tsdown)')
+/** Registry base + source: env → ./.npmrc → user .npmrc → publishConfig → default. */
+function resolveRegistry() {
+  const packageManifest = JSON.parse(read('package.json'))
+  const candidates = []
+  const seam = (process.env.DSH_POSTPUBLISH_REGISTRY_BASE ?? '').trim()
+  if (seam !== '') candidates.push([seam.replace(/\/+$/, ''), 'DSH_POSTPUBLISH_REGISTRY_BASE'])
+  const fromEnv = (process.env.npm_config_registry ?? '').trim()
+  if (fromEnv !== '') candidates.push([fromEnv.replace(/\/+$/, ''), 'npm_config_registry'])
+  const local = npmrcRegistry(join(root, '.npmrc'))
+  if (local !== undefined) candidates.push([local, './.npmrc'])
+  const userFile = process.env.NPM_CONFIG_USERCONFIG ?? join(homedir(), '.npmrc')
+  const user = npmrcRegistry(userFile)
+  if (user !== undefined) candidates.push([user, userFile])
+  const declared = typeof packageManifest.publishConfig?.registry === 'string'
+    ? packageManifest.publishConfig.registry.trim()
+    : ''
+  if (declared !== '') candidates.push([declared.replace(/\/+$/, ''), 'package.json publishConfig.registry'])
+  const [base, source] = candidates[0] ?? ['https://registry.npmjs.org', 'default']
+  return { base, source }
+}
+
+const packageName = JSON.parse(read('package.json')).name
+const registry = resolveRegistry()
+console.log(`release-check: registry ${registry.base} (source: ${registry.source})`)
+
+/** Three-state probe: absent (definite 404 / no such version) | published | unknown. */
+async function probePublished() {
+  let lastError
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(`${registry.base}/${encodeURIComponent(packageName)}`, {
+        signal: AbortSignal.timeout(10000),
+      })
+      if (response.status === 404) return { state: 'absent' }
+      if (response.ok) {
+        const doc = await response.json()
+        const published = typeof doc?.versions === 'object' && doc.versions !== null
+          && doc.versions[version] !== undefined
+        return { state: published ? 'published' : 'absent' }
+      }
+      lastError = new Error(`registry answered HTTP ${response.status}`)
+      console.log(`release-check: probe attempt ${attempt}/3 → HTTP ${response.status}`)
+    } catch (error) {
+      lastError = error
+      console.log(`release-check: probe attempt ${attempt}/3 → ${String(error?.message ?? error).split('\n')[0]}`)
+    }
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 2000))
+  }
+  return { state: 'unknown', error: lastError }
+}
+
+const outcome = await probePublished()
+if (outcome.state === 'published') {
+  fail(`version ${version} is already published on npm — bump the version`)
+} else if (outcome.state === 'absent') {
+  console.log(`release-check: ${version} is NOT published yet — safe to publish`)
+} else if (process.env.DSH_RELEASE_ALLOW_REGISTRY_UNREACHABLE === '1') {
+  console.log(`release-check: ⚠️  registry probe failed (${String(outcome.error?.message ?? '').split('\n')[0]}) — continuing because DSH_RELEASE_ALLOW_REGISTRY_UNREACHABLE=1`)
+} else {
+  fail(`could not determine whether ${version} is published: ${String(outcome.error?.message ?? outcome.error).split('\n')[0]} — fix the network/registry, or set DSH_RELEASE_ALLOW_REGISTRY_UNREACHABLE=1 to publish anyway`)
 }
 
 if (failures.length > 0) {
   console.error('\n❌ release-check FAILED — release is BLOCKED:')
   for (const f of failures) console.error(`   - ${f}`)
-  console.error('\nFix every item above, then re-run `pnpm release:check`.')
+  console.error('\nFix every item above, then re-run `npm run release:check`.')
   process.exit(1)
 }
 
