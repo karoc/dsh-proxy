@@ -23,9 +23,10 @@
   `@deepseek-ai/dsh-client-ui-settings: ">=0.1.7-rc.1"`. The gate that reads it ships from **DSH 0.1.7-rc.1** on — it
   compares every `@deepseek-ai/dsh*` peer against the running runtime and refuses
   a plugin the runtime fails, printing the `dsh plugin allow-version` remedy.
-  Runtimes older than that gate (0.1.7-alpha.1/2 and all of 0.1.2–0.1.6) evaluate
-  **no** peers: they still load this plugin and fail in the client half, so
-  **v0.1.3 remains the release for 0.1.2–0.1.6**. It is
+  Runtimes older than that gate evaluate **no** peers
+  and refuse nothing: on 0.1.2–0.1.6 the client half cannot render (the
+  `*Regular` icon names arrived in 0.1.7-alpha.1), so **v0.1.3 remains the
+  release for 0.1.2–0.1.6** — the 0.1.7 alphas have those icons and work. It is
   marked `peerDependenciesMeta.optional` because the host supplies that package
   at runtime, so npm installs nothing extra. Note the prerelease rule the range encodes (measured with the semver DSH
   actually resolves — 7.8.5): `>=0.1.7` and `^0.1.7` do **not** match a
