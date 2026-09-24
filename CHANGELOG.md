@@ -32,6 +32,17 @@
   DSH and nothing imports it (same stale reference as the `dsh.client.inject`
   row removed above).
 
+### Tests
+
+- **Guarantee gate, now part of `npm test`.** `docs/guarantees.md` lists this
+  plugin's negative guarantees and names the assertion label that pins each one;
+  `scripts/check-guarantees.mjs` fails the suite when a label disappears (12 rows
+  today, and the selector must exist in `scripts/*.spec.mjs`). Verified by
+  negative control: pointing a row at a non-existent label makes the gate FAIL.
+  The routing guard that shipped matching only the literal `127.0.0.1` stayed
+  invisible for months precisely because the assertion meant to pin it could not
+  fail — the gate plus the `127/8` assertion close that class of defect.
+
 ### Changed
 
 - **The dsh floor is now declared, not just documented.** `package.json`

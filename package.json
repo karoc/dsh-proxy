@@ -5,8 +5,12 @@
   "type": "module",
   "main": "lib/index.js",
   "exports": {
-    ".": { "default": "./lib/index.js" },
-    "./client": { "default": "./lib/client.js" },
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -20,7 +24,9 @@
     "LICENSE"
   ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-locale",
@@ -35,21 +41,40 @@
     "bundle": "tsdown --config ./tsdown.config.ts",
     "prepare": "tsdown --config ./tsdown.config.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/proxy-core.spec.mjs scripts/host-route.spec.mjs scripts/client-boot.spec.mjs scripts/cordis-mount.spec.mjs",
+    "test": "node --test scripts/proxy-core.spec.mjs scripts/host-route.spec.mjs scripts/client-boot.spec.mjs scripts/cordis-mount.spec.mjs && node scripts/check-guarantees.mjs",
     "accept": "node scripts/accept-gui.mjs && node scripts/verify-tooltip.mjs",
     "release:check": "node scripts/release-check.mjs",
     "prepack": "node scripts/release-check.mjs",
     "prepublishOnly": "node scripts/release-check.mjs && tsdown --config ./tsdown.config.ts",
-    "postpublish": "node scripts/post-publish-check.mjs"
+    "postpublish": "node scripts/post-publish-check.mjs",
+    "verify:guarantees": "node scripts/check-guarantees.mjs"
   },
-  "engines": { "node": ">=18" },
-  "keywords": ["deepseek-harness", "dsh", "plugin", "proxy", "model-provider", "settings", "smoothly-proxy", "sp"],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "proxy",
+    "model-provider",
+    "settings",
+    "smoothly-proxy",
+    "sp"
+  ],
   "author": "karoc",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/karoc/dsh-proxy.git" },
-  "bugs": { "url": "https://github.com/karoc/dsh-proxy/issues" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/karoc/dsh-proxy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/karoc/dsh-proxy/issues"
+  },
   "homepage": "https://github.com/karoc/dsh-proxy",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
@@ -62,6 +87,8 @@
     "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-client-ui-settings": { "optional": true }
+    "@deepseek-ai/dsh-client-ui-settings": {
+      "optional": true
+    }
   }
 }
