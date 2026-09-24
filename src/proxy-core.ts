@@ -35,7 +35,7 @@ import type { Duplex } from 'node:stream'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-const LOOPBACK = /^(127\.0\.0\.1|localhost|::1|0\.0\.0\.0)$/i
+const LOOPBACK = /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost|::1|0\.0\.0\.0)$/i
 
 /** Upstream proxy protocol, defaulting to http (legacy configs have no field). */
 export function upstreamProtocol(cfg: ProxyConfig): string {

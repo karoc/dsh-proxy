@@ -16,6 +16,22 @@
   16 px artwork default. **Support floor:** the client half requires dsh ≥ 0.1.7
   **since v0.1.4** — **v0.1.3 remains the release for 0.1.2–0.1.6**.
 
+- **Loopback was only recognised as the literal `127.0.0.1`.** The routing guard
+  was `/^(127\.0\.0\.1|localhost|::1|0\.0\.0\.0)$/`, so every other address in the
+  `127.0.0.0/8` block (e.g. `127.0.0.2`, used by interface aliases and some
+  container setups) was sent to the **upstream proxy** when it was listed in
+  `proxiedHosts` — contradicting the documented "loopback targets are always
+  direct" guarantee. The guard now matches the whole `127/8` block. The spec
+  assertion that was supposed to pin this was **vacuous** (it asserted the
+  loopback hosts against a `proxiedHosts` list that did not contain them, so it
+  returned "direct" for the unlisted-host reason and would have stayed green with
+  the guard deleted) — it now lists them, adds a positive control, and covers
+  `127.0.0.2`; verified red against the old guard before the fix.
+- Dropped the dead `@deepseek-ai/dsh-client-runtime/client` entry from the
+  bundler externals and the client-boot spec: that package no longer ships with
+  DSH and nothing imports it (same stale reference as the `dsh.client.inject`
+  row removed above).
+
 ### Changed
 
 - **The dsh floor is now declared, not just documented.** `package.json`

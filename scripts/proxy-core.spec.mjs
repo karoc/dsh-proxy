@@ -229,10 +229,26 @@ writeCfg({
     false,
     'disabled upstream never proxies',
   )
+  // The loopback hosts are put INTO proxiedHosts on purpose: only then does the
+  // result depend on the loopback guard. Asserting them against a list that does
+  // not contain them would pass for the wrong reason (an unlisted host is direct
+  // anyway) and would keep passing even if the guard were deleted — that is how
+  // the 127/8 hole below stayed invisible.
+  const listed = { ...base, proxiedHosts: ['127.0.0.1', '127.0.0.2', 'api.deepseek.com'] }
   assert.equal(
-    shouldProxy({ ...base, upstream: { ...base.upstream, port: 43210 } }, '127.0.0.1', 43211),
+    shouldProxy({ ...listed, upstream: { ...listed.upstream, port: 43210 } }, 'api.deepseek.com', 43211),
+    true,
+    'positive control: a listed non-loopback host does go through the upstream',
+  )
+  assert.equal(
+    shouldProxy({ ...listed, upstream: { ...listed.upstream, port: 43210 } }, '127.0.0.1', 43211),
     false,
     'loopback host is always direct even when listed',
+  )
+  assert.equal(
+    shouldProxy({ ...listed, upstream: { ...listed.upstream, port: 43210 } }, '127.0.0.2', 43211),
+    false,
+    'loopback is the whole 127/8 block, not only 127.0.0.1',
   )
   assert.equal(
     shouldProxy({ ...base, upstream: { ...base.upstream, port: 43210 } }, 'other.example', 43211),
