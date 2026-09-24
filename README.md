@@ -194,9 +194,16 @@ module table; everything else is inlined.
   falls back to a gear for every other id — including this section's
   `dsh-proxy`. The `settings.section` registration has no icon field, so an
   external plugin cannot set it without patching the shell. When DSH exposes a
-  per-section icon, use `IconGlobeOutline14` from `dsh-client-ui-primitives`
+  per-section icon, use `IconGlobeOutlineRegular` from `dsh-client-ui-primitives`
   for this section.
-- **Works with dsh ≥ 0.1.2 when installed the official way.** The loader
+- **Requires dsh ≥ 0.1.7 since v0.1.4 — v0.1.3 remains the release for
+  0.1.2–0.1.6.** DSH 0.1.7 renamed the icon exports (`IconX14` → `IconXRegular`,
+  the stroke-weight naming; upstream commit `4937343a5e`), so this section
+  imports the `*Regular` variants. The floor is declared as an **optional peer
+  dependency** on `@deepseek-ai/dsh-client-ui-settings`, so an older dsh refuses
+  to load the plugin and names the exact `dsh plugin allow-version` remedy
+  instead of rendering a broken settings section.
+- **Install it the official way.** The loader
   entry name, bundle registration id, and host plugin name are all
   `@karoc/dsh-proxy` (matching the npm package name). Hand-written `link:`
   dependencies are not recognized as packages by newer loaders — install via

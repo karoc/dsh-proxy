@@ -20,9 +20,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ReactNode } from 'react'
 import {
   Button,
-  IconChevronDownOutline14,
-  IconGlobeOutline14,
-  IconLinkOutline14,
+  IconChevronDownOutlineRegular,
+  IconGlobeOutlineRegular,
+  IconLinkOutlineRegular,
   Input,
   Menu,
   Tooltip,
@@ -112,7 +112,7 @@ function ProtocolSelector(props: {
           onClick={() => { setOpen((v) => !v) }}
         >
           <span>{matched?.label ?? t('protocolHttp')}</span>
-          <IconChevronDownOutline14 />
+          <IconChevronDownOutlineRegular />
         </button>
       )}
     />
@@ -381,7 +381,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
         <p>{t('proxiedHostsHint')}</p>
         <Input
           className="dsh-proxy-search"
-          icon={<IconGlobeOutline14 />}
+          icon={<IconGlobeOutlineRegular />}
           placeholder={t('searchPlaceholder')}
           value={query}
           onChange={(e) => { setQuery(e.target.value) }}
@@ -429,7 +429,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
       <p>{t('immediateHint')}</p>
 
       <div className="dsh-proxy-actions">
-        <Button variant="outline" size="md" icon={<IconLinkOutline14 />} disabled={testing || !enabled} onClick={() => { void test() }}>
+        <Button variant="outline" size="md" icon={<IconLinkOutlineRegular />} disabled={testing || !enabled} onClick={() => { void test() }}>
           {testing ? t('testing') : t('test')}
         </Button>
         {testResult !== undefined && (

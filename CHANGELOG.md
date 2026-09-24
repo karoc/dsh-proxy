@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.1.4] - 2026-09-25
+
+### Fixed
+
+- **DSH 0.1.7 icon rename (upstream commit `4937343a5e`, released from
+  `0.1.7-alpha.1`).** `IconChevronDownOutline14`, `IconGlobeOutline14` and
+  `IconLinkOutline14` no longer exist in `dsh-client-ui-primitives` — the size
+  suffix moved into each artwork's default and the name now carries the stroke
+  weight — so all three resolved to `undefined` and the Settings → Smoothly
+  Proxy section crashed on render (`React error #130`,
+  `slot entry crashed in 'settings.section'`). `src/client/ProxySection.tsx`
+  now imports the `*Regular` variants the built-in pages use. Rendered sizes:
+  the chevron stays 14 px; globe and link move to their 16 px artwork default
+  (they were 14 px before). **Support floor:** the client half requires
+  dsh ≥ 0.1.7 from the next release — **v0.1.3 remains the release for
+  0.1.2–0.1.6**.
+
+### Changed
+
+- **The dsh floor is now declared, not just documented.** `package.json`
+  declares an optional peer dependency
+  `@deepseek-ai/dsh-client-ui-settings: ">=0.1.7-rc.1"`. DSH ≥ 0.1.7 evaluates
+  every `@deepseek-ai/dsh*` peer against its own runtime version, so an older
+  dsh refuses to load this plugin and prints the exact
+  `dsh plugin allow-version` remedy instead of rendering a broken section. It is
+  marked `peerDependenciesMeta.optional` because the host supplies that package
+  at runtime, so npm installs nothing extra. Note the prerelease rule the range
+  encodes: `>=0.1.7` (or `^0.1.7`) does **not** match a `0.1.7-rc.N` runtime,
+  hence the explicit `-rc.1` floor.
+- Removed the stale `@deepseek-ai/dsh-client-runtime` entry from
+  `dsh.client.inject`: that package no longer ships with DSH (npm only has the
+  historical `0.0.1-rc.1`), and the loader silently ignored the unresolvable
+  row.
+
 ## [0.1.3]
 
 - **Brand name**: Smoothly Proxy / 思磨力代理插件 — the plugin's user-visible

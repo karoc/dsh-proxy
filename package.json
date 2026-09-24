@@ -1,6 +1,6 @@
 {
   "name": "@karoc/dsh-proxy",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Smoothly Proxy (思磨力代理插件): external DeepSeek Harness plugin — a model-provider forward proxy with per-host routing and a Settings page.",
   "type": "module",
   "main": "lib/index.js",
@@ -24,7 +24,6 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-primitives"
@@ -58,5 +57,11 @@
     "tsdown": "^0.22.0",
     "typescript": "^5.6.0"
   },
-  "peerDependencies": { "react": "^18.2.0" }
+  "peerDependencies": {
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.7-rc.1",
+    "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-ui-settings": { "optional": true }
+  }
 }
