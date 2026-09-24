@@ -11,28 +11,30 @@
   weight — so all three resolved to `undefined` and the Settings → Smoothly
   Proxy section crashed on render (`React error #130`,
   `slot entry crashed in 'settings.section'`). `src/client/ProxySection.tsx`
-  now imports the `*Regular` variants the built-in pages use. Rendered sizes:
-  the chevron stays 14 px; globe and link move to their 16 px artwork default
-  (they were 14 px before). **Support floor:** the client half requires
-  dsh ≥ 0.1.7 from the next release — **v0.1.3 remains the release for
-  0.1.2–0.1.6**.
+  now imports the `*Regular` variants the built-in pages use. Rendered sizes: the chevron and the globe
+  stay 14 px (their artwork defaults); only the link moves from 14 px to its
+  16 px artwork default. **Support floor:** the client half requires dsh ≥ 0.1.7
+  **since v0.1.4** — **v0.1.3 remains the release for 0.1.2–0.1.6**.
 
 ### Changed
 
 - **The dsh floor is now declared, not just documented.** `package.json`
   declares an optional peer dependency
-  `@deepseek-ai/dsh-client-ui-settings: ">=0.1.7-rc.1"`. DSH ≥ 0.1.7 evaluates
-  every `@deepseek-ai/dsh*` peer against its own runtime version, so an older
-  dsh refuses to load this plugin and prints the exact
-  `dsh plugin allow-version` remedy instead of rendering a broken section. It is
+  `@deepseek-ai/dsh-client-ui-settings: ">=0.1.7-rc.1"`. The gate that reads it ships from **DSH 0.1.7-rc.1** on — it
+  compares every `@deepseek-ai/dsh*` peer against the running runtime and refuses
+  a plugin the runtime fails, printing the `dsh plugin allow-version` remedy.
+  Runtimes older than that gate (0.1.7-alpha.1/2 and all of 0.1.2–0.1.6) evaluate
+  **no** peers: they still load this plugin and fail in the client half, so
+  **v0.1.3 remains the release for 0.1.2–0.1.6**. It is
   marked `peerDependenciesMeta.optional` because the host supplies that package
-  at runtime, so npm installs nothing extra. Note the prerelease rule the range
-  encodes: `>=0.1.7` (or `^0.1.7`) does **not** match a `0.1.7-rc.N` runtime,
-  hence the explicit `-rc.1` floor.
+  at runtime, so npm installs nothing extra. Note the prerelease rule the range encodes (measured with the semver DSH
+  actually resolves — 7.8.5): `>=0.1.7` and `^0.1.7` do **not** match a
+  `0.1.7-rc.N` runtime, hence the explicit `-rc.1` floor. semver 7.7.4 answers
+  `true` for the caret form.
 - Removed the stale `@deepseek-ai/dsh-client-runtime` entry from
-  `dsh.client.inject`: that package no longer ships with DSH (npm only has the
-  historical `0.0.1-rc.1`), and the loader silently ignored the unresolvable
-  row.
+  `dsh.client.inject`: that package no longer ships with DSH (11 versions exist on npm, but `latest`
+  is still the historical `0.0.1-rc.1` and nothing in the harness tree provides
+  it), and the loader silently ignored the unresolvable row.
 
 ## [0.1.3]
 

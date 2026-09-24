@@ -16,9 +16,9 @@
 
 ## 它新增了什么
 
-一个放在内置 **Models** 与 **Model reasoning** 页之后的新设置项 **「思磨力代理 / Smoothly Proxy」**，包含：
+一个新的设置项 **「思磨力代理 / Smoothly Proxy」**（导航顺序 25），排在内置 **Models** 页以及（若装了该插件）外部 **Model reasoning** 页之后，包含：
 
-- **上游代理卡片**：启用开关、协议选择（HTTP / HTTPS / SOCKS5）、主机、端口、可选用户名/密码，以及**测试连接**按钮（验证上游是否会说对应协议）；
+- **上游代理卡片**：启用开关、协议选择（HTTP / HTTPS / SOCKS5）、主机、端口、可选用户名/密码，以及**测试连接**按钮（SOCKS5 上游走 SOCKS5 握手、HTTP 上游走 `CONNECT` 探测；HTTPS 上游只验证 TCP 可达——不校验其 TLS 握手）；
 - **模型提供方**列表——从你的 dsh `settings.yaml` 读取的主机（`llm-deepseek.baseURL`、`llm-pi-ai.providers.<n>.baseURL`、任意 `llm-*` 命名空间），有友好显示名时以显示名标注；
 - **其它已观测主机**列表——代理在流量中见过的主机（含 `registry.npmjs.org` 等安装/更新流量），持久化进 `proxy.json` 以跨重启保留；
 - **搜索框**——输入时按主机 / 名称过滤上面两个列表。
@@ -93,8 +93,8 @@ git 安装会运行包的 `prepare` 脚本构建 bundle。pnpm ≥ 10 需要先�
 用 pnpm update 升到最新版（或重 `add` 以拉取更新的 git ref）：
 
 ```sh
-dsh plugin --profile web update dsh-proxy
-# 或，若依赖规格被 pin 住：dsh plugin --profile web add dsh-proxy
+dsh plugin --profile web update @karoc/dsh-proxy
+# 或，若依赖规格被 pin 住：dsh plugin --profile web add @karoc/dsh-proxy
 ```
 
 然后**重启 `dsh web`** 以加载新客户端 bundle。
@@ -102,7 +102,7 @@ dsh plugin --profile web update dsh-proxy
 ### 卸载
 
 ```sh
-dsh plugin --profile web remove dsh-proxy
+dsh plugin --profile web remove @karoc/dsh-proxy
 ```
 
 同时从 `web` profile 移除依赖与 bundle 层。重启 `dsh web` 后该设置项消失。
@@ -120,14 +120,15 @@ src/client/index.ts   # client apply：注册 settings.section（id dsh-proxy）
 src/client/ProxySection.tsx  # 设置页（上游卡片 + 主机列表）
 src/client/styles.ts  # design-token 样式（--dsw-alias-*）+ 注入
 src/client/locales.ts # en/zh 文案
-scripts/proxy-core.spec.mjs  # 行为测试（13 场景，无外部网络）
+scripts/*.spec.mjs    # 行为测试：proxy-core.ts（13 场景）+ host route / client
+                      # boot / cordis mount，全程无外部网络
 ```
 
 ### /proxy/api 路由
 
 host 半区用同源 HTTP 路由为设置页供数（内置 `/api` 前缀被 gateway 占用，故用 `/proxy/api`）：
 
-- `GET  /proxy/api` → `{ upstream, proxiedHosts, knownHosts, hosts, providers, port }`
+- `GET  /proxy/api` → `{ ok, upstream, proxiedHosts, knownHosts, hosts, providers, port }`
 - `POST /proxy/api` `{ op: 'save', upstream, proxiedHosts }` → 清洗后持久化的配置
 - `POST /proxy/api` `{ op: 'test', upstream }` → `{ ok, detail }`
 - `POST /proxy/api` `{ op: 'persist' }` → 把观测主机并入 `knownHosts`
@@ -137,7 +138,9 @@ host 半区用同源 HTTP 路由为设置页供数（内置 `/api` 前缀被 gat
 ```sh
 pnpm install
 pnpm bundle          # 产出 lib/index.js + lib/client.js
-pnpm test            # tsc --noEmit + proxy-core.spec.mjs（13 场景）
+pnpm typecheck        # tsc --noEmit
+pnpm test             # node --test：proxy-core（13 场景）+ host-route /
+                      # client-boot / cordis-mount，无外部网络
 pnpm release:check   # 发布门禁：文档/changelog/tag/工作区/构建/registry 全过
 pnpm publish         # 跑门禁（prepack/prepublishOnly），随后 postpublish 验证线上发布
 ```
@@ -148,9 +151,10 @@ bundle 把平台包（`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client
 
 - **代理是进程级出站点，不是模型逐请求读的开关。** 它通过把进程的 `HTTP(S)_PROXY` 指向自身来实现。本插件 host `apply()` 之后 dsh 发起的请求（任何子进程、以及 global dispatcher 仍是惰性的 undici fetch）会走代理。若某个 dsh 内部 fetch 在插件加载前就已实体化了 dispatcher，可能不会走它——文档化的解法是重启 dsh（桌面壳通过 spawn dsh 前设环境变量来施加同样的边界）。
 - `npm`/`pnpm` 安装/更新流量与其它一样走代理；改动**与安装/更新相关的主机**会在下次安装/更新时生效（已在进行的操作保留其环境）。
+- **SOCKS5 上游只承载 HTTPS 目标。** SOCKS5 没有 absolute-URI 的 HTTP 模式，因此选中的纯 `http://` 主机会退回直连（设置页也写明了这一点）。
 - **设置页导航图标由壳分配，插件无法自定义。** 内置 `ui-settings-general` 的 `SettingsRoot.tsx` `navIcon(id)` 只映射已知 id，其它 id（包括本节的 `dsh-proxy`）一律齿轮。`settings.section` 注册没有 icon 字段，外部插件不 patch 壳就改不了。等 DSH 开放每节图标后，本节建议用 `dsh-client-ui-primitives` 的 `IconGlobeOutlineRegular`。
-- **本节自下一个版本起要求 dsh ≥ 0.1.7（0.1.2–0.1.6 请用 v0.1.3）。** DSH 0.1.7 改了图标导出名（`IconX14` → `IconXRegular`，尺寸后缀并入 artwork 默认值、名字改为承载笔画权重；上游 commit `4937343a5e`），本节现在导入 `*Regular` 变体。该下限已声明为对 `@deepseek-ai/dsh-client-ui-settings` 的**可选 peer 依赖**：旧 dsh 会拒绝加载本插件并给出 `dsh plugin allow-version` 的具体解法，而不是渲染出坏掉的分区。
-- **需以官方方式安装才生效。** loader entry 名、bundle 注册 id、host 插件名三者均为 `@karoc/dsh-proxy`（与 npm 包名一致）。新版 loader 不再把手写 `link:` 依赖识别为包——请用 `dsh plugin --profile web add @karoc/dsh-proxy`（npm）或 `dsh plugin --profile web add link:/path/to/dsh-proxy`（源码）安装，然后重启 `dsh web`。
+- **本节自 v0.1.4 起要求 dsh ≥ 0.1.7（0.1.2–0.1.6 请用 v0.1.3）。** DSH 0.1.7 改了图标导出名（`IconX14` → `IconXRegular`，尺寸后缀并入 artwork 默认值、名字改为承载笔画权重；上游 commit `4937343a5e`），本节现在导入 `*Regular` 变体。该下限已声明为对 `@deepseek-ai/dsh-client-ui-settings` 的**可选 peer 依赖**，由 dsh ≥ 0.1.7 的兼容门禁按运行时版本判定（不匹配则拒绝加载该 bundle，并给出 `dsh plugin allow-version` 的具体解法）。0.1.7 之前的 dsh 没有这道门禁，仍会加载本插件并渲染出坏掉的分区——那些运行时请用 v0.1.3。
+- **需以官方方式安装才生效。** loader entry 名、bundle 注册 id、host 插件名三者均为 `@karoc/dsh-proxy`（与 npm 包名一致）。手写 `link:` 依赖只有在包管理器把它落到 profile 的 `node_modules` 下、且 profile 的 `dsh.profile.bundles` 列出它之后才算数——请用 `dsh plugin --profile web add @karoc/dsh-proxy`（npm）或 `dsh plugin --profile web add link:/path/to/dsh-proxy`（源码）安装，然后重启 `dsh web`。
 - 桌面壳（`dsh-desktop`）保留自己的代理与托盘设置窗口——本插件是独立抽取，不是替代品。两者可共存（例如把 `dsh-proxy` 装进壳的 profile，同时获得 dsh 内设置页）。
 
 ## License

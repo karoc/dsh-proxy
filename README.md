@@ -29,12 +29,15 @@ desktop shell had.
 
 ## What it adds
 
-A new Settings section, **「思磨力代理 / Smoothly Proxy」**, placed after the
-built-in **Models** and **Model reasoning** pages. It shows:
+A new Settings section, **「思磨力代理 / Smoothly Proxy」** (nav order 25), placed
+after the built-in **Models** page and, when that plugin is installed, the
+external **Model reasoning** page. It shows:
 
 - an **upstream proxy card**: enable toggle, protocol selector (HTTP / HTTPS /
   SOCKS5), host, port, optional username/password, and a **Test connection**
-  button that verifies the upstream speaks its protocol;
+  button (a SOCKS5 handshake for SOCKS5, a `CONNECT` probe for HTTP; an HTTPS
+  upstream is only checked for TCP reachability — its TLS handshake is not
+  verified);
 - a **model providers** list — hosts read from your dsh `settings.yaml`
   (`llm-deepseek.baseURL`, `llm-pi-ai.providers.<n>.baseURL`, any `llm-*`
   namespace), labeled with the friendly display name where available;
@@ -119,8 +122,8 @@ A git install runs the package's `prepare` script to build the bundle. pnpm ≥ 
 Bump to the newest release with pnpm update (or re-add to pick up a newer git ref):
 
 ```sh
-dsh plugin --profile web update dsh-proxy
-# or, if the dependency spec is pinned: dsh plugin --profile web add dsh-proxy
+dsh plugin --profile web update @karoc/dsh-proxy
+# or, if the dependency spec is pinned: dsh plugin --profile web add @karoc/dsh-proxy
 ```
 
 Then **restart `dsh web`** so the new client bundle loads.
@@ -128,7 +131,7 @@ Then **restart `dsh web`** so the new client bundle loads.
 ### Removing
 
 ```sh
-dsh plugin --profile web remove dsh-proxy
+dsh plugin --profile web remove @karoc/dsh-proxy
 ```
 
 This removes both the dependency and its bundle layer from the `web` profile. Restart `dsh web` for the section to disappear.
@@ -149,7 +152,8 @@ src/client/index.ts   # client apply: register settings.section (id dsh-proxy)
 src/client/ProxySection.tsx  # the settings page (upstream card + host lists)
 src/client/styles.ts  # design-token styles (--dsw-alias-*) + injection
 src/client/locales.ts # en/zh copy
-scripts/proxy-core.spec.mjs  # behavioral tests (13 scenarios, no network)
+scripts/*.spec.mjs    # behavioral tests: proxy-core.ts (13 scenarios) plus
+                      # host route / client boot / cordis mount — no network
 ```
 
 ### The /proxy/api route
@@ -157,7 +161,7 @@ scripts/proxy-core.spec.mjs  # behavioral tests (13 scenarios, no network)
 The host half serves the settings page over a same-origin HTTP route (the
 built-in `/api` prefix is reserved for the gateway, so this uses `/proxy/api`):
 
-- `GET  /proxy/api` → `{ upstream, proxiedHosts, knownHosts, hosts, providers, port }`
+- `GET  /proxy/api` → `{ ok, upstream, proxiedHosts, knownHosts, hosts, providers, port }`
 - `POST /proxy/api` `{ op: 'save', upstream, proxiedHosts }` → sanitized + persisted config
 - `POST /proxy/api` `{ op: 'test', upstream }` → `{ ok, detail }`
 - `POST /proxy/api` `{ op: 'persist' }` → merge observed hosts into `knownHosts`
@@ -167,7 +171,9 @@ built-in `/api` prefix is reserved for the gateway, so this uses `/proxy/api`):
 ```sh
 pnpm install
 pnpm bundle          # emits lib/index.js + lib/client.js
-pnpm test            # tsc --noEmit + proxy-core.spec.mjs (13 scenarios)
+pnpm typecheck        # tsc --noEmit
+pnpm test             # node --test: proxy-core (13 scenarios) + host-route /
+                      # client-boot / cordis-mount specs (no network)
 pnpm release:check   # release gate: docs/changelog/tag/tree/build/registry must all pass
 pnpm publish         # runs the gate (prepack/prepublishOnly), then postpublish verifies the live release
 ```
@@ -189,6 +195,9 @@ module table; everything else is inlined.
 - `npm`/`pnpm` install/update traffic goes through the proxy like everything
   else; toggling a host **related to install/update** takes effect on the next
   install/update (already-in-flight operations keep their environment).
+- **A SOCKS5 upstream only carries HTTPS targets.** SOCKS5 has no absolute-URI
+  HTTP mode, so a selected plain `http://` host falls back to direct through a
+  SOCKS5 upstream (the settings page states the same thing).
 - **Section nav icon is shell-assigned, not plugin-assigned.** The built-in
   `ui-settings-general` `SettingsRoot.tsx` `navIcon(id)` maps known ids and
   falls back to a gear for every other id — including this section's
@@ -200,14 +209,17 @@ module table; everything else is inlined.
   0.1.2–0.1.6.** DSH 0.1.7 renamed the icon exports (`IconX14` → `IconXRegular`,
   the stroke-weight naming; upstream commit `4937343a5e`), so this section
   imports the `*Regular` variants. The floor is declared as an **optional peer
-  dependency** on `@deepseek-ai/dsh-client-ui-settings`, so an older dsh refuses
-  to load the plugin and names the exact `dsh plugin allow-version` remedy
-  instead of rendering a broken settings section.
+  dependency** on `@deepseek-ai/dsh-client-ui-settings`, which the dsh ≥ 0.1.7
+  compatibility gate compares against the running dsh version — a mismatch
+  refuses the bundle and names the exact `dsh plugin allow-version` remedy.
+  dsh < 0.1.7 predates that gate, so those runtimes still load this plugin and
+  render a broken section — install v0.1.3 there.
 - **Install it the official way.** The loader
   entry name, bundle registration id, and host plugin name are all
-  `@karoc/dsh-proxy` (matching the npm package name). Hand-written `link:`
-  dependencies are not recognized as packages by newer loaders — install via
-  `dsh plugin --profile web add @karoc/dsh-proxy` (npm) or
+  `@karoc/dsh-proxy` (matching the npm package name). A hand-written `link:`
+  dependency only counts once the package manager has materialized it under the
+  profile's `node_modules` and the profile lists it in `dsh.profile.bundles` —
+  install via `dsh plugin --profile web add @karoc/dsh-proxy` (npm) or
   `dsh plugin --profile web add link:/path/to/dsh-proxy` (source), then restart
   `dsh web`.
 - The desktop shell (`dsh-desktop`) keeps its own proxy and tray settings

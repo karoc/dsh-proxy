@@ -8,7 +8,8 @@ model-provider proxying.
 ```sh
 pnpm install        # dev deps (tsdown, typescript, react types)
 pnpm typecheck      # tsc --noEmit
-pnpm test           # typecheck + scripts/proxy-core.spec.mjs (13 scenarios)
+pnpm test           # node --test: proxy-core (13 scenarios) + host-route /
+                    # client-boot / cordis-mount specs (no external network)
 pnpm bundle         # emit lib/index.js + lib/client.js
 ```
 
@@ -24,7 +25,7 @@ To see the plugin live in the GUI, link it into a profile:
 ```jsonc
 // ~/.dsh/profiles/web/package.json
 "dependencies": { "@karoc/dsh-proxy": "link:/path/to/dsh-proxy", ... },
-"dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", ..., "dsh-proxy"] } }
+"dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", ..., "@karoc/dsh-proxy"] } }
 ```
 
 Then `cd ~/.dsh/profiles/web && pnpm install` and **restart `dsh web`**
