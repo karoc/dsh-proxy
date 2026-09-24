@@ -34,6 +34,13 @@
 
 ### Tests
 
+- **Negative controls, now part of `npm test`** (`npm run test:controls`).
+  A gate nobody has seen fail is not evidence, so `scripts/test-negative-controls.mjs`
+  clones the committed tree per scenario, injects ONE defect, and asserts the
+  gate fails with the documented message: a dirty tree, a removed CHANGELOG
+  entry, a deleted release tag, a removed build artifact, and a guarantee row
+  whose pinning assertion no longer exists — plus a positive control (an
+  unmutated clone must pass both gates). 5/5 mutations caught.
 - **Guarantee gate, now part of `npm test`.** `docs/guarantees.md` lists this
   plugin's negative guarantees and names the assertion label that pins each one;
   `scripts/check-guarantees.mjs` fails the suite when a label disappears (12 rows

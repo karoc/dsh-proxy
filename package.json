@@ -41,13 +41,14 @@
     "bundle": "tsdown --config ./tsdown.config.ts",
     "prepare": "tsdown --config ./tsdown.config.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/proxy-core.spec.mjs scripts/host-route.spec.mjs scripts/client-boot.spec.mjs scripts/cordis-mount.spec.mjs && node scripts/check-guarantees.mjs",
+    "test": "node --test scripts/proxy-core.spec.mjs scripts/host-route.spec.mjs scripts/client-boot.spec.mjs scripts/cordis-mount.spec.mjs && node scripts/check-guarantees.mjs && node scripts/test-negative-controls.mjs",
     "accept": "node scripts/accept-gui.mjs && node scripts/verify-tooltip.mjs",
     "release:check": "node scripts/release-check.mjs",
     "prepack": "node scripts/release-check.mjs",
     "prepublishOnly": "node scripts/release-check.mjs && tsdown --config ./tsdown.config.ts",
     "postpublish": "node scripts/post-publish-check.mjs",
-    "verify:guarantees": "node scripts/check-guarantees.mjs"
+    "verify:guarantees": "node scripts/check-guarantees.mjs",
+    "test:controls": "node scripts/test-negative-controls.mjs"
   },
   "engines": {
     "node": ">=18"
