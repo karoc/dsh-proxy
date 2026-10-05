@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.1.5] - 2026-10-06
+
+### Fixed
+
+- **The model-provider list went empty (`0`) on dsh ≥ 0.2.** The host half
+  derived provider hosts by parsing `<DSH_HOME>/settings.yaml`. dsh 0.2 removed
+  that document: at boot `SettingsForms.importLegacyDocument()` renames it to
+  `settings.yaml.imported` and imports every section into the **active profile's**
+  config document (`~/.dsh/profiles/<name>/cordis.patch.yml`, a top-level YAML
+  array of `{id, name, config}` entries; upstream commit `601d6761e4`,
+  `feat(settings): project volatile Config through profile-backed forms`). The
+  reader therefore found no file, returned `[]`, and Settings → Smoothly Proxy
+  rendered an empty list — while the built-in model pages kept showing the same
+  providers normally.
+
+  Evidence on the affected machine: `GET /proxy/api` answered `providers: []`,
+  `~/.dsh/settings.yaml` was gone (only `settings.yaml.imported` remained), and
+  the GUI's own settings read (`POST /api/settings/describe`) answered
+  `llm-pi-ai.value.providers.<key>.{displayName, baseURL}` for all seven
+  configured routes.
+
+  The host half now reads the **live settings document**
+  (`ctx.get('settings').describe()` — the same call dsh's own settings pages
+  read) and keeps the legacy `<DSH_HOME>/settings.yaml` only as the fallback for
+  a composition without a settings service (dsh < 0.2, or a read that throws). A
+  readable live document always wins, so a leftover legacy file can never
+  resurrect stale hosts. The provider list is read per request, so adding or
+  renaming a provider route reaches the page on the next load — no dsh restart.
+
+- **Loopback provider hosts were offered as proxy targets.** A provider whose
+  `baseURL` is loopback (`127.0.0.1`, `localhost`, `::1`, `0.0.0.0`) appeared in
+  the model-provider list with a checkbox that could never take effect — routing
+  sends loopback direct no matter what. Such hosts are now dropped from the list
+  on both the live and the legacy path, matching the observed-host list, and the
+  page copy now says the list is read live from your dsh settings (the old text
+  named `settings.yaml`, a file dsh 0.2 no longer has).
+
+### Added
+
+- Negative controls for the new behavior, re-proved on every `npm test`: the
+  reported defect re-injected (host half stops reading the live document) must
+  redden `host-route.spec.mjs`; a resolver that prefers the legacy file, and a
+  provider list that offers loopback hosts again, must redden
+  `proxy-core.spec.mjs`. Guarantees G13–G15 (`docs/guarantees.md`) pin the
+  loopback rule, the live-over-legacy order, and the "a settings read that
+  throws still answers 200" fallback.
+
 ## [0.1.4] - 2026-09-25
 
 ### Fixed

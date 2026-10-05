@@ -14,8 +14,9 @@ It runs a loopback forward proxy inside the dsh host process, points the
 process's egress traffic at it (`HTTP(S)_PROXY` + `NODE_USE_ENV_PROXY`), and
 routes **only the hosts you select** through an optional upstream proxy
 (HTTP / HTTPS / SOCKS5, with optional Basic auth). Everything else stays
-direct. Model-provider hosts are derived from your dsh `settings.yaml`, and
-hosts observed in traffic are collected for you — both appear as checkboxes.
+direct. Model-provider hosts are read LIVE from your running dsh
+configuration, and hosts observed in traffic are collected for you — both
+appear as checkboxes.
 
 Why an external plugin: the built-in settings pages don't cover outbound
 proxying, and adding one to a built-in package would be overwritten by the next
@@ -38,9 +39,13 @@ external **Model reasoning** page. It shows:
   button (a SOCKS5 handshake for SOCKS5, a `CONNECT` probe for HTTP; an HTTPS
   upstream is only checked for TCP reachability — its TLS handshake is not
   verified);
-- a **model providers** list — hosts read from your dsh `settings.yaml`
-  (`llm-deepseek.baseURL`, `llm-pi-ai.providers.<n>.baseURL`, any `llm-*`
-  namespace), labeled with the friendly display name where available;
+- a **model providers** list — hosts read LIVE from your running dsh
+  configuration (`llm-deepseek.baseURL`, `llm-pi-ai.providers.<n>.baseURL`, any
+  `llm-*` namespace), labeled with the friendly display name where available.
+  The values come from the harness's own settings document, so the list follows
+  the running configuration wherever dsh keeps it; a harness that still has the
+  pre-0.2 `<DSH_HOME>/settings.yaml` is read as the fallback. Loopback
+  endpoints are omitted — they can never be proxied;
 - an **other observed hosts** list — hosts the proxy has seen in traffic
   (including `registry.npmjs.org` install/update traffic), persisted into
   `proxy.json` so they survive restarts;

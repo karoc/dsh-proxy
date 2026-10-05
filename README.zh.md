@@ -8,7 +8,7 @@
 
 **思磨力代理插件**（**Smoothly Proxy** / 思磨力）是一个**外部** DeepSeek Harness 插件：为**模型提供方**提供带**按主机路由**的**正向代理**，并附带一个专职设置页。
 
-它在 dsh host 进程内启动一个 loopback 正向代理，把进程的出站流量指向它（`HTTP(S)_PROXY` + `NODE_USE_ENV_PROXY`），**只把你在设置页勾选的主机**转发到可选的上游代理（HTTP / HTTPS / SOCKS5，支持可选 Basic 认证），其余全部直连。模型提供方主机从你的 dsh `settings.yaml` 读取，流量中观测到的主机也会被收集——两者都以复选框形式出现。
+它在 dsh host 进程内启动一个 loopback 正向代理，把进程的出站流量指向它（`HTTP(S)_PROXY` + `NODE_USE_ENV_PROXY`），**只把你在设置页勾选的主机**转发到可选的上游代理（HTTP / HTTPS / SOCKS5，支持可选 Basic 认证），其余全部直连。模型提供方主机**实时**读自正在运行的 dsh 配置，流量中观测到的主机也会被收集——两者都以复选框形式出现。
 
 为什么要做成外部插件：内置设置页不覆盖出站代理，而给内置包加一页会在官方下次发布时被覆盖。本包作为可安装的 **bundle** 交付，从不触碰仓库源码，官方更新无法覆盖它。
 
@@ -19,7 +19,7 @@
 一个新的设置项 **「思磨力代理 / Smoothly Proxy」**（导航顺序 25），排在内置 **Models** 页以及（若装了该插件）外部 **Model reasoning** 页之后，包含：
 
 - **上游代理卡片**：启用开关、协议选择（HTTP / HTTPS / SOCKS5）、主机、端口、可选用户名/密码，以及**测试连接**按钮（SOCKS5 上游走 SOCKS5 握手、HTTP 上游走 `CONNECT` 探测；HTTPS 上游只验证 TCP 可达——不校验其 TLS 握手）；
-- **模型提供方**列表——从你的 dsh `settings.yaml` 读取的主机（`llm-deepseek.baseURL`、`llm-pi-ai.providers.<n>.baseURL`、任意 `llm-*` 命名空间），有友好显示名时以显示名标注；
+- **模型提供方**列表——**实时**读自正在运行的 dsh 配置的主机（`llm-deepseek.baseURL`、`llm-pi-ai.providers.<n>.baseURL`、任意 `llm-*` 命名空间），有友好显示名时以显示名标注。取值来自 harness 自己的 settings 文档，因此列表跟着运行中的配置走，与 dsh 把文档放在哪里无关；仍在用 0.2 之前 `<DSH_HOME>/settings.yaml` 的 harness 会回退读那个文件。loopback 端点不会出现——它们永远不可能被代理；
 - **其它已观测主机**列表——代理在流量中见过的主机（含 `registry.npmjs.org` 等安装/更新流量），持久化进 `proxy.json` 以跨重启保留；
 - **搜索框**——输入时按主机 / 名称过滤上面两个列表。
 

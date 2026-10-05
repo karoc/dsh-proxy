@@ -86,6 +86,56 @@ const scenarios = [
       writeFileSync(p, after)
     },
   },
+  {
+    // The reported defect, re-injected at the seam that caused it: the host half
+    // stops reading the live settings document and falls back to the legacy
+    // file, which dsh ≥ 0.2 has already renamed away — the provider list goes
+    // empty again (0 providers in the settings page).
+    name: 'provider list stops reading the live settings document',
+    command: 'node --test scripts/host-route.spec.mjs',
+    expect: /providers come from the live settings document/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/index.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace('live: liveSettingsDocument(ctx),', 'live: undefined,')
+      if (after === before) throw new Error('mutation did not apply — src/index.ts no longer reads the live settings document')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // The layering itself: a readable live document must win. Without this the
+    // gate could pass while the resolver silently prefers the legacy file.
+    name: 'layered resolver prefers the legacy document over a live one',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /live settings document wins over a stale legacy settings\.yaml/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        'return opts.live !== undefined ? providerHostsFromEntries(opts.live) : providerHostsFromSettings(opts.legacyPath)',
+        'return providerHostsFromSettings(opts.legacyPath)',
+      )
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer layers the live document')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // A loopback provider offered as a proxy target is a checkbox that can
+    // never take effect (routing sends loopback direct by guarantee).
+    name: 'loopback provider hosts offered as proxy targets again',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /loopback provider hosts are never offered as proxy targets/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        'if (host && !LOOPBACK.test(host.toLowerCase())) out.push(',
+        'if (host) out.push(',
+      )
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer filters loopback provider hosts')
+      writeFileSync(p, after)
+    },
+  },
 ]
 
 let failed = 0

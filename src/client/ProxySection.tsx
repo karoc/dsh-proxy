@@ -6,11 +6,11 @@
  * host) through an optional upstream proxy, per host. The host half runs the
  * proxy and serves /proxy/api; this page reads and writes it with plain
  * same-origin fetch (no settingsScope — the proxy config lives in
- * <DSH_HOME>/proxy.json, not in dsh settings.yaml).
+ * <DSH_HOME>/proxy.json, not in the dsh settings document).
  *
  * UI mirrors the dsh-desktop settings window: upstream card (enabled /
  * protocol selector / host / port / username / password / test connection),
- * a "model providers" list derived from dsh settings.yaml, and an "other
+ * a "model providers" list derived from the LIVE settings document, and an "other
  * observed hosts" list, each with a per-host checkbox. A search box filters
  * both lists. Saving writes the config; the running proxy re-reads proxy.json
  * on every request, so changes take effect immediately.
@@ -29,7 +29,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { en } from './locales.ts'
 
-/** One model provider derived from dsh settings.yaml by the host. */
+/** One model provider derived from the live settings document by the host. */
 export interface ProviderHost {
   name: string
   host: string

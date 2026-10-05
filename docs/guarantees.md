@@ -22,3 +22,6 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G10 | 配置里**多余的键被丢弃**，不落盘、不回显 | `extra key dropped (sanitized)` |
 | G11 | 未知协议收敛为 `http`、端口钳到 `65535`（不产生非法配置） | `unknown protocol collapses to http; port clamps to 65535` |
 | G12 | SOCKS5 上游只承载 HTTPS/CONNECT 目标；纯 `http` 目标**退回直连**而不是发错协议 | `http target with socks5 upstream falls back to direct` |
+| G13 | loopback 的**提供方主机永不作为代理目标出现**（勾选也永远不会生效——路由恒直连），live/legacy 两条路径一致 | `loopback provider hosts are never offered as proxy targets` |
+| G14 | 提供方列表以**实时 settings 文档**为准；存在遗留 `settings.yaml` 时也不会用它覆盖 live（防止陈旧数据复活） | `live settings document wins over a stale legacy settings.yaml` |
+| G15 | settings 读取**失败或服务缺席**时 `/proxy/api` 仍返回 200 并回退到 legacy 文档，不把设置页打挂 | `a throwing settings read keeps GET /proxy/api at 200` |

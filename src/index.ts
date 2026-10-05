@@ -12,6 +12,11 @@
  *   toggling a host in the settings page takes effect immediately — no dsh
  *   restart needed.
  *
+ * The settings page's model-provider list is read from the LIVE settings
+ * document (ctx.get('settings').describe()) — the same source the GUI's own
+ * pages render — with the pre-0.2 `<home>/settings.yaml` kept as the fallback
+ * for harnesses that still have one.
+ *
  * Timing note (honest limitation): in-process dsh `fetch()` calls that happen
  * BEFORE this bundle's apply() runs (e.g. a startup version check) may already
  * have materialized undici's global dispatcher without proxy awareness. The
@@ -29,9 +34,10 @@ import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   createForwardProxy,
-  providerHostsFromSettings,
+  resolveProviderHosts,
   testUpstreamProxy,
   writeProxyConfig,
+  type ProviderHost,
   type ProxyConfig,
   type UpstreamConfig,
 } from './proxy-core.ts'
@@ -55,7 +61,7 @@ export function proxyConfigPath(home: string = resolveDshHome()): string {
   return join(home, 'proxy.json')
 }
 
-/** The dsh settings.yaml this plugin derives model-provider hosts from. */
+/** The LEGACY dsh settings.yaml (dsh < 0.2), kept as the fallback provider source. */
 export function settingsPath(home: string = resolveDshHome()): string {
   return join(home, 'settings.yaml')
 }
@@ -88,7 +94,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 /**
  * The settings page's full view of the proxy: persisted config + live
- * observed hosts + model-provider hosts from dsh settings.yaml.
+ * observed hosts + model-provider hosts from the LIVE settings document.
  */
 export interface ProxyView {
   ok: boolean
@@ -98,12 +104,33 @@ export interface ProxyView {
   knownHosts: string[]
   /** Hosts observed by the running proxy this session (live). */
   hosts: string[]
-  /** [{name, host, displayName?}] derived from <home>/settings.yaml. */
-  providers: Array<{ name: string; host: string; displayName?: string }>
+  /** [{name, host, displayName?}] from the active settings entries' llm-* values. */
+  providers: ProviderHost[]
+}
+
+/**
+ * The live settings document, when this composition exposes one. `settings.
+ * describe()` answers with every active entry's CURRENT values — the same call
+ * the GUI's own settings pages read — so the provider list follows the running
+ * configuration instead of a file whose name and shape upstream is free to
+ * change (dsh ≥ 0.2 moved it into the profile document and deleted the legacy
+ * `settings.yaml`, which is exactly how this list went empty).
+ *
+ * `undefined` when no settings service is in the composition or the read
+ * throws: the caller then falls back to the legacy `<home>/settings.yaml`.
+ */
+function liveSettingsDocument(ctx: Context): unknown {
+  try {
+    const settings = ctx.get('settings') as { describe?: () => unknown } | undefined
+    if (settings === undefined || typeof settings.describe !== 'function') return undefined
+    return settings.describe()
+  } catch {
+    return undefined
+  }
 }
 
 /** Build the fresh settings view. */
-function viewOf(forwardProxy: ForwardProxyHandle): ProxyView {
+function viewOf(forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[]): ProxyView {
   const cfg = forwardProxy.config()
   return {
     ok: true,
@@ -112,7 +139,7 @@ function viewOf(forwardProxy: ForwardProxyHandle): ProxyView {
     proxiedHosts: cfg.proxiedHosts,
     knownHosts: cfg.knownHosts,
     hosts: forwardProxy.hosts(),
-    providers: providerHostsFromSettings(settingsPath()),
+    providers: providers(),
   }
 }
 
@@ -175,7 +202,7 @@ function startProxy(opts: { configFile: string; log: (line: string) => void }): 
 }
 
 /** Register the /proxy/api route (GET view, POST save/test/persist). */
-function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle): void {
+function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[]): void {
   const server = ctx.get('webServer') as
     | { register: (route: { kind: 'prefix'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }) => () => void }
     | undefined
@@ -196,7 +223,7 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle): void {
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = req.method ?? 'GET'
     if (method === 'GET') {
-      sendJson(res, 200, viewOf(forwardProxy))
+      sendJson(res, 200, viewOf(forwardProxy, providers))
       return
     }
     if (method === 'POST') {
@@ -220,7 +247,7 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle): void {
               body.upstream,
               Array.isArray(body.proxiedHosts) ? body.proxiedHosts : [],
             )
-            sendJson(res, 200, { ...viewOf(forwardProxy), upstream: cfg.upstream, proxiedHosts: cfg.proxiedHosts })
+            sendJson(res, 200, { ...viewOf(forwardProxy, providers), upstream: cfg.upstream, proxiedHosts: cfg.proxiedHosts })
           } catch (error) {
             sendJson(res, 400, { ok: false, error: `dsh-proxy: save failed: ${(error as Error).message}` })
           }
@@ -233,7 +260,7 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle): void {
         }
         case 'persist': {
           try { forwardProxy.persistKnownHosts() } catch { /* best-effort */ }
-          sendJson(res, 200, viewOf(forwardProxy))
+          sendJson(res, 200, viewOf(forwardProxy, providers))
           return
         }
         default:
@@ -259,7 +286,13 @@ export function apply(ctx: Context): void {
   }
 
   const forwardProxy = startProxy({ configFile: proxyConfigPath(), log })
-  registerWebApi(ctx, forwardProxy)
+  // Read the provider list per request: a settings edit (add/rename a provider
+  // route) reaches the page on the next load, like every other value here.
+  const providers = (): ProviderHost[] => resolveProviderHosts({
+    live: liveSettingsDocument(ctx),
+    legacyPath: settingsPath(),
+  })
+  registerWebApi(ctx, forwardProxy, providers)
 
   ctx.effect(() => () => {
     try { forwardProxy.close() } catch { /* already closed */ }

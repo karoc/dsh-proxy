@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import {
   createForwardProxy, readProxyConfig, shouldProxy, providerHostsFromSettings,
+  providerHostsFromEntries, resolveProviderHosts,
   sanitizeUpstream, writeProxyConfig, normalizeHost, defaultProxyConfig,
 } from '../src/proxy-core.ts'
 
@@ -477,9 +478,106 @@ writeCfg({
   assert.deepEqual(onDisk.proxiedHosts, ['api.deepseek.com', 'example.org', '127.0.0.1'], 'written proxy.json holds normalized hosts (loopback kept, routing ignores it)')
 }
 
+// ── scenario 14: provider hosts from the LIVE settings document ─────────────
+// Why this scenario exists: dsh ≥ 0.2 imports <home>/settings.yaml into the
+// active profile's config document and deletes the file, so a reader pinned to
+// that file silently answered [] and the settings page showed 0 providers.
+// The fixture mirrors the shape the running harness really answers with —
+// captured from GET /api/settings/describe on 2026-10-06 (`result.value
+// .namespaces[] = {ns, value, …}`, llm-pi-ai.value.providers.<key>.{displayName,
+// baseURL}) — so the assertions cannot pass against a shape nobody produces.
+{
+  const liveNamespaces = [
+    { ns: 'llm-pi-ai', value: { providers: {
+      'volcengine-agent-plan-k': { displayName: '火山方舟 Agent Plan K', baseURL: 'https://ark.cn-beijing.volces.com/api/plan/v3' },
+      'opencode-go-self': { displayName: 'OC Go 自定义', baseURL: 'https://opencode.ai/zen/go/v1' },
+      'local-sub2api-oai-chat': { displayName: '本地 OAI Chat', baseURL: 'http://127.0.0.1:37780/v1' },
+      multi: { baseURL: 'https://api1.example,https://api2.example' },
+      bare: { baseURL: 'https://bare.example/v1' },
+      broken: { displayName: 'Broken', baseURL: 'not a url' },
+      endpointless: { displayName: 'Opaque' },
+      scalar: 'nope',
+    } } },
+    { ns: 'llm-deepseek', value: { baseURL: 'https://api.deepseek.com/anthropic' } },
+    // A non-llm-* entry that also carries a baseURL: the document holds every
+    // plugin's entry, and this list is the MODEL PROVIDER list.
+    { ns: 'web-search-deepseek', value: { baseURL: 'https://search.example' } },
+    { ns: 'ui-theme', value: { fontSize: 16 } },
+    { ns: 'not-an-entry' },
+  ]
+  const expected = [
+    { name: 'llm-pi-ai/volcengine-agent-plan-k', displayName: '火山方舟 Agent Plan K', host: 'ark.cn-beijing.volces.com' },
+    { name: 'llm-pi-ai/opencode-go-self', displayName: 'OC Go 自定义', host: 'opencode.ai' },
+    { name: 'llm-pi-ai/multi', host: 'api1.example' },
+    { name: 'llm-pi-ai/multi', host: 'api2.example' },
+    { name: 'llm-pi-ai/bare', host: 'bare.example' },
+    { name: 'llm-deepseek', displayName: 'DeepSeek', host: 'api.deepseek.com' },
+  ]
+  // Rules first, each with the smallest case that can fail — the layer order
+  // below is also what makes the negative controls name the exact assertion.
+  assert.deepEqual(providerHostsFromEntries(undefined), [], 'no live document -> no provider hosts')
+  assert.deepEqual(
+    providerHostsFromEntries({ namespaces: [{ ns: 'llm-pi-ai', value: { providers: { local: { baseURL: 'http://localhost:11434/v1' } } } }] }),
+    [],
+    'loopback provider hosts are never offered as proxy targets',
+  )
+  // The same classification on the LEGACY path: a loopback target can never go
+  // upstream, so it is not offered there either.
+  const legacyWithLoopback = join(work, 'legacy-loopback.yaml')
+  writeFileSync(legacyWithLoopback, [
+    'llm-pi-ai:',
+    '  providers:',
+    '    local:',
+    '      baseURL: http://127.0.0.1:11434/v1',
+    '    remote:',
+    '      baseURL: https://remote.example/v1',
+    '',
+  ].join('\n'))
+  assert.deepEqual(
+    providerHostsFromSettings(legacyWithLoopback),
+    [{ name: 'llm-pi-ai/remote', host: 'remote.example' }],
+    'legacy loopback provider hosts are dropped too',
+  )
+  assert.deepEqual(
+    providerHostsFromEntries({ namespaces: [{ ns: 'llm-pi-ai', value: { providers: [] } }, { ns: 'llm-retry', value: null }] }),
+    [],
+    'malformed provider values are skipped, not fatal',
+  )
+  assert.deepEqual(
+    providerHostsFromEntries(liveNamespaces),
+    expected,
+    'live settings entries yield provider hosts (llm-* only, displayName, comma lists)',
+  )
+  // The container form the client RPC answers with must work too.
+  assert.deepEqual(
+    providerHostsFromEntries({ namespaces: liveNamespaces }),
+    expected,
+    'live settings container form ({ namespaces }) yields the same provider hosts',
+  )
+  // Layering: a readable live document wins, even when a legacy file still exists.
+  const staleLegacy = join(work, 'stale-settings.yaml')
+  writeFileSync(staleLegacy, ['llm-pi-ai:', '  providers:', '    stale:', '      baseURL: https://stale.example/v1', ''].join('\n'))
+  assert.deepEqual(
+    resolveProviderHosts({ live: liveNamespaces, legacyPath: staleLegacy }),
+    expected,
+    'live settings document wins over a stale legacy settings.yaml',
+  )
+  assert.deepEqual(
+    resolveProviderHosts({ live: [], legacyPath: staleLegacy }),
+    [],
+    'an empty live document is still authoritative — the legacy file is not resurrected',
+  )
+  assert.deepEqual(
+    resolveProviderHosts({ live: undefined, legacyPath: staleLegacy }),
+    [{ name: 'llm-pi-ai/stale', host: 'stale.example' }],
+    'legacy settings.yaml is read only when no live settings document exists',
+  )
+  assert.deepEqual(resolveProviderHosts({ live: undefined, legacyPath: join(work, 'nope.yaml') }), [], 'no source at all -> empty list')
+}
+
 proxy.close()
 up.srv.close()
 o1.srv.close()
 rmSync(work, { recursive: true, force: true })
-console.log('PASS — proxy-core (13 scenarios)')
+console.log('PASS — proxy-core (14 scenarios)')
 process.exit(0)

@@ -197,17 +197,117 @@ export function readProxyConfig(configFile: string): ProxyConfig {
   }
 }
 
+/** One model-provider host the settings page offers as a proxy target. */
+export interface ProviderHost {
+  name: string
+  host: string
+  displayName?: string
+}
+
+/** Friendly name for a namespace whose providers carry no `displayName`. */
+function defaultDisplayName(ns: string): string | null {
+  return ns === 'llm-deepseek' ? 'DeepSeek' : null
+}
+
 /**
- * Best-effort extraction of model provider hosts from a dsh settings.yaml
- * (llm-deepseek.baseURL / llm-pi-ai.providers.<n>.baseURL / any other llm-*
- * namespace). Returns [{name, host, displayName?}]: `name` is the dsh
+ * Append one provider unit's hosts. `name` is the dsh namespace (or
+ * `ns/provider`); loopback hosts are dropped — they can never be proxied
+ * (routing sends them direct no matter what), so offering them as a toggle
+ * would be a checkbox that does nothing.
+ */
+function pushProviderHosts(
+  out: ProviderHost[],
+  unit: { ns: string; provider: string | null; displayName: string | null; baseUrls: string[] },
+): void {
+  // baseURL may carry a trailing comma or be a comma-separated fallback list
+  // (e.g. "https://api.xxx.com," or "a,b"). Node's URL parser would swallow
+  // the comma INTO the hostname ("api.xxx.com,"), which then never matches
+  // the real CONNECT target and silently breaks proxying — split and parse
+  // each candidate instead.
+  const name = unit.provider ? `${unit.ns}/${unit.provider}` : unit.ns
+  const displayName = unit.displayName || defaultDisplayName(unit.ns)
+  for (const baseUrl of unit.baseUrls) {
+    for (const candidate of String(baseUrl).split(',').map((s) => s.trim()).filter(Boolean)) {
+      try {
+        const host = new URL(candidate).hostname
+        if (host && !LOOPBACK.test(host.toLowerCase())) out.push({ name, ...(displayName ? { displayName } : {}), host })
+      } catch { /* malformed candidate — skip */ }
+    }
+  }
+}
+
+/** True when `value` is a plain object we can read fields from. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Model provider hosts from the LIVE settings document — the shape
+ * `settings.describe()` answers with (and the GUI's own model page renders).
+ * Sources of truth move: dsh ≥ 0.2 imports the old `<home>/settings.yaml` into
+ * the active profile's config document and deletes it, so a file reader
+ * silently returns nothing. Reading the harness's own live values survives
+ * that (and any future document move).
+ *
+ * Accepts the descriptor container (`{ namespaces: [...] }`) or the bare array,
+ * and reads each `llm-*` namespace: `providers.<key>.{baseURL, displayName}`
+ * (llm-pi-ai) or a namespace-level `baseURL` (llm-deepseek). Non-`llm-*`
+ * namespaces are ignored — a settings document holds every plugin's entries,
+ * and this list is the model provider list.
+ */
+export function providerHostsFromEntries(entries: unknown): ProviderHost[] {
+  const list = Array.isArray(entries)
+    ? entries
+    : isRecord(entries) && Array.isArray(entries['namespaces']) ? entries['namespaces'] : []
+  const out: ProviderHost[] = []
+  for (const entry of list) {
+    if (!isRecord(entry)) continue
+    const ns = typeof entry['ns'] === 'string' ? entry['ns'] : ''
+    if (!ns.startsWith('llm-')) continue
+    const value = entry['value']
+    if (!isRecord(value)) continue
+    if (isRecord(value['providers'])) {
+      for (const [provider, block] of Object.entries(value['providers'])) {
+        if (!isRecord(block)) continue
+        const displayName = typeof block['displayName'] === 'string' ? block['displayName'].trim() : ''
+        pushProviderHosts(out, {
+          ns,
+          provider,
+          displayName: displayName || null,
+          baseUrls: typeof block['baseURL'] === 'string' ? [block['baseURL']] : [],
+        })
+      }
+      continue
+    }
+    if (typeof value['baseURL'] === 'string') {
+      pushProviderHosts(out, { ns, provider: null, displayName: null, baseUrls: [value['baseURL']] })
+    }
+  }
+  return out
+}
+
+/**
+ * Resolve the model-provider list from the best source available: the LIVE
+ * settings document when the harness exposes one (`live` is an array — empty
+ * included), else the legacy `<home>/settings.yaml` of dsh < 0.2. A readable
+ * live document always wins: on dsh ≥ 0.2 the legacy file has been renamed
+ * `.imported`, so falling back to it could only resurrect stale hosts.
+ */
+export function resolveProviderHosts(opts: { live?: unknown; legacyPath: string }): ProviderHost[] {
+  return opts.live !== undefined ? providerHostsFromEntries(opts.live) : providerHostsFromSettings(opts.legacyPath)
+}
+
+/**
+ * Best-effort extraction of model provider hosts from a LEGACY dsh settings.yaml
+ * (dsh < 0.2: llm-deepseek.baseURL / llm-pi-ai.providers.<n>.baseURL / any other
+ * llm-* namespace). Returns [{name, host, displayName?}]: `name` is the dsh
  * namespace (or `ns/provider`), `displayName` the friendly name when known
  * (llm-pi-ai providers carry a `displayName` field; llm-deepseek is fixed to
  * "DeepSeek"). Empty when unreadable — the proxy's observed-host list still
  * populates the settings UI.
  */
-export function providerHostsFromSettings(settingsPath: string): Array<{ name: string; host: string; displayName?: string }> {
-  const out: Array<{ name: string; host: string; displayName?: string }> = []
+export function providerHostsFromSettings(settingsPath: string): ProviderHost[] {
+  const out: ProviderHost[] = []
   let text: string
   try {
     text = readFileSync(settingsPath, 'utf8')
@@ -215,21 +315,7 @@ export function providerHostsFromSettings(settingsPath: string): Array<{ name: s
     return out
   }
   const push = (current: { ns: string; provider: string | null; displayName: string | null; baseUrls: string[] }) => {
-    // baseURL may carry a trailing comma or be a comma-separated fallback list
-    // (e.g. "https://api.xxx.com," or "a,b"). Node's URL parser would swallow
-    // the comma INTO the hostname ("api.xxx.com,"), which then never matches
-    // the real CONNECT target and silently breaks proxying — split and parse
-    // each candidate instead.
-    const name = current.provider ? `${current.ns}/${current.provider}` : current.ns
-    const displayName = current.displayName || (current.ns === 'llm-deepseek' ? 'DeepSeek' : null)
-    for (const baseUrl of current.baseUrls) {
-      for (const candidate of String(baseUrl).split(',').map((s) => s.trim()).filter(Boolean)) {
-        try {
-          const host = new URL(candidate).hostname
-          if (host) out.push({ name, ...(displayName ? { displayName } : {}), host })
-        } catch { /* malformed candidate — skip */ }
-      }
-    }
+    pushProviderHosts(out, current)
   }
   // Collect each provider block (baseURL list + displayName) and emit it as a
   // whole — ORDER-INDEPENDENT, because a real settings.yaml may list baseURL

@@ -11,7 +11,7 @@
 //   - POST op=test returns {ok, detail}
 //   - the loopback proxy actually forwards a request (route through it)
 import { createServer } from 'node:http'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
@@ -37,12 +37,25 @@ const webServer = {
   },
 }
 
-// Fake cordis ctx: only `get('webServer')` and `effect` are used by apply().
+// Fake cordis ctx: `get('webServer')` + `get('settings')` are the only reads
+// apply() makes. The settings service answers the shape the running harness
+// answers with (`{namespaces: [{ns, value}]}`) — and is swappable, so the specs
+// below can prove the live source is read (per request, not cached) and that a
+// missing/throwing service falls back to the legacy document.
+const liveDocument = () => ({ namespaces: [
+  { ns: 'llm-pi-ai', value: { providers: {
+    ark: { displayName: 'Ark', baseURL: 'https://ark.example/v1' },
+    local: { displayName: 'Local', baseURL: 'http://127.0.0.1:11434/v1' },
+  } } },
+  { ns: 'llm-deepseek', value: { baseURL: 'https://api.deepseek.com/anthropic' } },
+] })
+let settingsService = { describe: () => liveDocument() }
 const disposers = []
 const ctx = {
   get(key) {
-    assert.equal(key, 'webServer')
-    return webServer
+    if (key === 'webServer') return webServer
+    if (key === 'settings') return settingsService
+    return undefined
   },
   effect(fn) {
     const disposer = fn()
@@ -71,7 +84,7 @@ const api = async (method, body) => {
 
 try {
   await run()
-  console.log('PASS — host apply + /proxy/api (6 scenarios)')
+  console.log('PASS — host apply + /proxy/api (7 scenarios)')
   process.exit(0)
 } finally {
   server.close()
@@ -99,6 +112,40 @@ async function run() {
     assert.ok(Array.isArray(body.providers), 'providers is a list')
     assert.ok(Array.isArray(body.hosts), 'hosts is a list')
     assert.ok(Array.isArray(body.knownHosts), 'knownHosts is a list')
+  }
+
+  // ── GET: model providers come from the LIVE settings service ─────────────
+  {
+    const { body } = await api('GET')
+    assert.deepEqual(body.providers, [
+      { name: 'llm-pi-ai/ark', displayName: 'Ark', host: 'ark.example' },
+      { name: 'llm-deepseek', displayName: 'DeepSeek', host: 'api.deepseek.com' },
+    ], 'providers come from the live settings document (loopback entry dropped)')
+
+    // A provider added to the live config shows up on the NEXT read — no
+    // restart, no snapshot cached at apply() time.
+    settingsService = { describe: () => ({ namespaces: [
+      { ns: 'llm-pi-ai', value: { providers: { fresh: { baseURL: 'https://fresh.example/v1' } } } },
+    ] }) }
+    const after = await api('GET')
+    assert.deepEqual(after.body.providers, [{ name: 'llm-pi-ai/fresh', host: 'fresh.example' }], 'provider list follows the live document on every read')
+
+    // No settings service (older composition): the legacy document is read.
+    settingsService = undefined
+    mkdirSync(home, { recursive: true })
+    writeFileSync(settingsPath(), ['llm-pi-ai:', '  providers:', '    legacy:', '      baseURL: https://legacy.example/v1', ''].join('\n'))
+    const legacy = await api('GET')
+    assert.deepEqual(legacy.body.providers, [{ name: 'llm-pi-ai/legacy', host: 'legacy.example' }], 'no settings service -> legacy settings.yaml is read')
+
+    // A settings read that throws must not take the route down.
+    settingsService = { describe: () => { throw new Error('settings unavailable') } }
+    const thrown = await api('GET')
+    assert.equal(thrown.status, 200, 'a throwing settings read keeps GET /proxy/api at 200')
+    assert.deepEqual(thrown.body.providers, [{ name: 'llm-pi-ai/legacy', host: 'legacy.example' }], 'a throwing settings read falls back to the legacy document')
+
+    // Restore the live service + drop the scratch legacy file.
+    settingsService = { describe: () => liveDocument() }
+    rmSync(settingsPath(), { force: true })
   }
 
   // ── POST save: persists sanitized config ─────────────────────────────────
