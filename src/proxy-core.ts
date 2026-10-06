@@ -181,6 +181,7 @@ export function defaultProxyConfig(): ProxyConfig {
     proxiedHosts: [],
     knownHosts: [],
     listenPort: 0,
+    routeMode: 'only-listed',
   }
 }
 
@@ -193,6 +194,7 @@ export function readProxyConfig(configFile: string): ProxyConfig {
       ...(raw ?? {}),
       upstream: { ...defaultProxyConfig().upstream, ...(raw?.upstream ?? {}) },
       listenPort: normalizeListenPort(raw?.listenPort),
+      routeMode: normalizeRouteMode(raw?.routeMode),
     }
   } catch {
     return defaultProxyConfig()
@@ -389,7 +391,9 @@ export function shouldProxy(cfg: ProxyConfig, host: string, selfPort?: number): 
   if (LOOPBACK.test(h)) return false
   const u = cfg?.upstream
   const selfRef = u?.host && LOOPBACK.test(u.host.toLowerCase()) && Number(u.port) === selfPort
-  return Boolean(u?.enabled) && !selfRef && (cfg?.proxiedHosts ?? []).includes(h)
+  if (!Boolean(u?.enabled) || selfRef) return false
+  const listed = (cfg?.proxiedHosts ?? []).includes(h)
+  return normalizeRouteMode(cfg?.routeMode) === 'except-listed' ? !listed : listed
 }
 
 /**
@@ -658,20 +662,24 @@ export function sanitizeUpstream(v: unknown): UpstreamConfig {
  * arbitrary keys). Takes effect immediately: the running proxy re-reads
  * proxy.json on every request.
  */
-export function writeProxyConfig(configFile: string, upstream: unknown, proxiedHosts: string[], listenPort?: unknown): ProxyConfig {
+export function writeProxyConfig(
+  configFile: string,
+  patch: { upstream?: unknown; proxiedHosts?: string[]; listenPort?: unknown; routeMode?: unknown },
+): ProxyConfig {
   const cfg = readProxyConfig(configFile)
   const hosts: string[] = []
-  for (const h of proxiedHosts ?? []) {
+  for (const h of patch.proxiedHosts ?? cfg.proxiedHosts ?? []) {
     const t = normalizeHost(h)
     if (t !== '') hosts.push(t)
   }
   const next: ProxyConfig = {
     ...cfg,
-    upstream: sanitizeUpstream(upstream),
+    upstream: patch.upstream === undefined ? cfg.upstream : sanitizeUpstream(patch.upstream),
     proxiedHosts: hosts,
-    // Omitted -> keep what was stored: a save that only edits the upstream must
-    // not silently move the port a launcher already points at.
-    listenPort: listenPort === undefined ? cfg.listenPort : normalizeListenPort(listenPort),
+    // Omitted -> keep what was stored: a save that only edits one field must not
+    // silently move the port a launcher points at, or flip the routing rule.
+    listenPort: patch.listenPort === undefined ? cfg.listenPort : normalizeListenPort(patch.listenPort),
+    routeMode: patch.routeMode === undefined ? cfg.routeMode : normalizeRouteMode(patch.routeMode),
   }
   const text = JSON.stringify(next, null, 2)
   // Ensure the parent directory exists (a fresh DSH_HOME has no proxy.json
@@ -807,10 +815,26 @@ export interface UpstreamConfig {
   password: string
 }
 
+/**
+ * Which way `proxiedHosts` reads:
+ *   * `only-listed`  — the checked hosts go upstream, everything else direct (default);
+ *   * `except-listed` — the checked hosts stay direct, everything else goes upstream.
+ * The un-checked default is the safe one: installing the plugin never sends
+ * traffic anywhere until the user asks for it.
+ */
+export type RouteMode = 'only-listed' | 'except-listed'
+
+/** Coerce a stored/edited route mode; anything unknown means the default. */
+export function normalizeRouteMode(value: unknown): RouteMode {
+  return value === 'except-listed' ? 'except-listed' : 'only-listed'
+}
+
 export interface ProxyConfig {
   upstream: UpstreamConfig
   proxiedHosts: string[]
   knownHosts: string[]
+  /** See {@link RouteMode}. */
+  routeMode: RouteMode
   /**
    * Port the forward proxy listens on: 0 (default) for an ephemeral one, or a
    * fixed port for deployments where the LAUNCH environment names this proxy

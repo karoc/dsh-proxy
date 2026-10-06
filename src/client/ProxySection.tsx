@@ -29,6 +29,9 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { en } from './locales.ts'
 
+/** Which way the checked hosts read: the ones to proxy, or the ones to leave direct. */
+export type RouteMode = 'only-listed' | 'except-listed'
+
 /** One model provider derived from the live settings document by the host. */
 export interface ProviderHost {
   name: string
@@ -56,6 +59,8 @@ export interface ProxyView {
   egressDetail: string | null
   upstream: UpstreamDraft
   proxiedHosts: string[]
+  /** Whether the checked hosts are the ones proxied, or the ones left direct. */
+  routeMode: RouteMode
   knownHosts: string[]
   hosts: string[]
   providers: ProviderHost[]
@@ -83,10 +88,10 @@ export interface ProxySectionProps {
   close?: () => void
 }
 
-const PROTOCOLS: Array<{ id: UpstreamDraft['protocol']; label: string }> = [
-  { id: 'http', label: 'HTTP' },
-  { id: 'https', label: 'HTTPS' },
-  { id: 'socks5', label: 'SOCKS5' },
+const PROTOCOLS: Array<{ id: UpstreamDraft['protocol']; labelKey: keyof typeof en }> = [
+  { id: 'http', labelKey: 'protocolHttp' },
+  { id: 'https', labelKey: 'protocolHttps' },
+  { id: 'socks5', labelKey: 'protocolSocks5' },
 ]
 
 /** Fetch helper bound to the same-origin /proxy/api endpoint. */
@@ -111,7 +116,7 @@ function ProtocolSelector(props: {
     <Menu
       open={open}
       onClose={() => { setOpen(false) }}
-      items={PROTOCOLS.map((o) => ({ id: o.id, label: o.label }))}
+      items={PROTOCOLS.map((o) => ({ id: o.id, label: t(o.labelKey) }))}
       selectedId={value}
       onSelect={(id) => { onChange(id as UpstreamDraft['protocol']); setOpen(false) }}
       align="start"
@@ -125,11 +130,38 @@ function ProtocolSelector(props: {
           aria-expanded={open}
           onClick={() => { setOpen((v) => !v) }}
         >
-          <span>{matched?.label ?? t('protocolHttp')}</span>
+          <span>{t(matched?.labelKey ?? 'protocolHttp')}</span>
           <IconChevronDownOutlineRegular />
         </button>
       )}
     />
+  )
+}
+
+/** The routing rule: which way the checkboxes read. */
+function RouteModeSelector(props: {
+  value: RouteMode
+  onChange: (v: RouteMode) => void
+  t: (key: keyof typeof en) => string
+}): ReactNode {
+  const options: Array<{ id: RouteMode; labelKey: keyof typeof en }> = [
+    { id: 'only-listed', labelKey: 'modeOnlyListed' },
+    { id: 'except-listed', labelKey: 'modeExceptListed' },
+  ]
+  return (
+    <div className="dsh-proxy-segmented" role="group" aria-label={props.t('modeLabel')}>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          className={o.id === props.value ? 'is-active' : ''}
+          aria-pressed={o.id === props.value}
+          onClick={() => { props.onChange(o.id) }}
+        >
+          {props.t(o.labelKey)}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -138,10 +170,12 @@ function HostRow(props: {
   host: string
   label: string
   checked: boolean
-  proxied: boolean
+  /** Effective route for this host right now (checkbox + rule + upstream on/off). */
+  routed: boolean
   onToggle: (host: string) => void
+  t: (key: keyof typeof en) => string
 }): ReactNode {
-  const { host, label, checked, proxied, onToggle } = props
+  const { host, label, checked, routed, onToggle, t } = props
   const labelRef = useRef<HTMLSpanElement | null>(null)
   const [overflowing, setOverflowing] = useState(false)
 
@@ -184,7 +218,7 @@ function HostRow(props: {
           <Tooltip label={label} side="top" maxWidth={480} delayMs={300}>{labelNode}</Tooltip>
         )
         : labelNode}
-      <span className="dsh-proxy-host-route">{proxied ? 'via upstream' : 'direct'}</span>
+      <span className="dsh-proxy-host-route">{routed ? t('viaUpstream') : t('direct')}</span>
     </label>
   )
 }
@@ -220,6 +254,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [listenPort, setListenPort] = useState('')
+  const [routeMode, setRouteMode] = useState<RouteMode>('only-listed')
   // The listen port is an implementation detail, not a setting: this panel stays
   // collapsed unless something needs the user's attention (a launcher owning
   // egress, a failed self-install, a port that could not be bound, or a
@@ -242,6 +277,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
       setPassword(data.upstream.password)
       setListenPort(data.listenPort > 0 ? String(data.listenPort) : '')
       setAdoptedPort(data.listenPort === 0 && data.portRequested > 0)
+      setRouteMode(data.routeMode ?? 'only-listed')
       setProxied(new Set(data.proxiedHosts))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -310,6 +346,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
             password,
           },
           proxiedHosts: [...proxied],
+          routeMode,
           listenPort: Number(listenPort) || 0,
         }),
       })
@@ -342,6 +379,16 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
       setTesting(false)
     }
   }
+
+  // A host is proxied only when the upstream is actually usable AND the rule
+  // says so — the checkbox alone no longer implies the route.
+  const selfLoop = view !== undefined
+    && view.upstream.enabled
+    && /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost|::1)$/i.test(view.upstream.host.trim())
+    && view.upstream.port === view.port
+  const upstreamUsable = view?.upstream.enabled === true && !selfLoop
+  const isRouted = (host: string): boolean => upstreamUsable
+    && (routeMode === 'except-listed' ? !proxied.has(host) : proxied.has(host))
 
   const providerFiltered = providerHosts.filter((e) => match(e.label))
   const otherFiltered = otherHosts.filter((e) => match(e.label))
@@ -494,8 +541,13 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
       </div>
 
       <div className="dsh-proxy-group">
-        <h3>{t('proxiedHostsTitle')}</h3>
-        <p>{t('proxiedHostsHint')}</p>
+        <div className="dsh-proxy-row">
+          <span className="dsh-proxy-proto">{t('modeLabel')}</span>
+          <RouteModeSelector value={routeMode} onChange={(v) => { setRouteMode(v); setSaved(false) }} t={t} />
+        </div>
+        <h3>{routeMode === 'except-listed' ? t('directHostsTitle') : t('proxiedHostsTitle')}</h3>
+        <p>{routeMode === 'except-listed' ? t('directHostsHint') : t('proxiedHostsHint')}</p>
+        {selfLoop && <div className="dsh-proxy-note dsh-proxy-note-warn">{t('selfLoopWarning')}</div>}
         <Input
           className="dsh-proxy-search"
           icon={<IconGlobeOutlineRegular />}
@@ -518,8 +570,9 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
                 host={e.host}
                 label={e.label}
                 checked={proxied.has(e.host)}
-                proxied={proxied.has(e.host)}
+                routed={isRouted(e.host)}
                 onToggle={toggleHost}
+                t={t}
               />
             ))}
         </div>
@@ -536,8 +589,9 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
                 host={e.host}
                 label={e.label}
                 checked={proxied.has(e.host)}
-                proxied={proxied.has(e.host)}
+                routed={isRouted(e.host)}
                 onToggle={toggleHost}
+                t={t}
               />
             ))}
         </div>

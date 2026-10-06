@@ -30,3 +30,5 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G18 | 启动环境**已声明代理**时，插件绝不 layer/抢占 egress（本插件的代理把未勾选主机直连，覆盖上去等于静默绕过启动方的策略） | `a launcher-declared proxy is never displaced by the plugin` |
 | G19 | 自装 harness 出网策略**失败必须显式报告**（页面给出启动环境兜底），绝不把"没装上"当成"已代理" | `an unresolvable policy package is reported as unavailable` |
 | G20 | 未固定端口时**采纳启动环境声明的 loopback 端口**（那是启动方期望本代理所在的地址）；非 loopback 或非法值绝不采纳 | `adoption recognises the loopback spellings` |
+| G21 | 「除勾选外全部走上游」模式下语义**显式反转**：未勾选主机走上游、勾选主机直连；上游禁用或 loopback 目标仍然不代理 | `except-listed: an unchecked host goes upstream` |
+| G22 | 无法识别的 `routeMode` 一律收敛为**默认（只代理勾选）**，绝不因为坏值变成"全部走上游" | `an unknown route mode falls back to only-listed, never to all-upstream` |

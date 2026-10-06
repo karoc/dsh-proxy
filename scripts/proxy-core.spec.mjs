@@ -20,7 +20,7 @@ import {
   createForwardProxy, readProxyConfig, shouldProxy, providerHostsFromSettings,
   providerHostsFromEntries, resolveProviderHosts,
   sanitizeUpstream, writeProxyConfig, normalizeHost, defaultProxyConfig,
-  normalizeListenPort,
+  normalizeListenPort, normalizeRouteMode,
 } from '../src/proxy-core.ts'
 
 const work = mkdtempSync(join(tmpdir(), 'dsh-proxy-'))
@@ -469,7 +469,10 @@ writeCfg({
   assert.equal(normalizeHost('  API.DeepSeek.COM, '), 'api.deepseek.com', 'normalize trims/lowercases/drops trailing comma')
   assert.equal(normalizeHost('   '), '', 'blank host normalizes to empty')
   // writeProxyConfig: persists sanitized config and returns the saved shape.
-  const saved = writeProxyConfig(cfgFile, { enabled: true, protocol: 'socks5', host: 'proxy.example', port: 1080, username: 'a', password: 'b' }, ['API.DeepSeek.com,', '  example.org  ', '', '127.0.0.1'])
+  const saved = writeProxyConfig(cfgFile, {
+    upstream: { enabled: true, protocol: 'socks5', host: 'proxy.example', port: 1080, username: 'a', password: 'b' },
+    proxiedHosts: ['API.DeepSeek.com,', '  example.org  ', '', '127.0.0.1'],
+  })
   assert.deepEqual(saved, {
     ...defaultProxyConfig(),
     upstream: { enabled: true, protocol: 'socks5', host: 'proxy.example', port: 1080, username: 'a', password: 'b' },
@@ -576,6 +579,40 @@ writeCfg({
   assert.deepEqual(resolveProviderHosts({ live: undefined, legacyPath: join(work, 'nope.yaml') }), [], 'no source at all -> empty list')
 }
 
+// ── scenario 15b: the routing rule (which way the checkboxes read) ──────────
+// Why: "everything except the checked hosts" inverts a promise the whole page
+// makes ("checked hosts go upstream"). The inversion has to be explicit and
+// pinned, and an unreadable stored value must fall back to the SAFE direction
+// (nothing proxied) rather than to "send everything upstream".
+{
+  const base = {
+    ...defaultProxyConfig(),
+    upstream: { enabled: true, protocol: 'http', host: 'up.example', port: 8080, username: '', password: '' },
+    proxiedHosts: ['a.example'],
+  }
+  assert.equal(shouldProxy({ ...base, routeMode: 'only-listed' }, 'a.example'), true, 'only-listed: a checked host goes upstream')
+  assert.equal(shouldProxy({ ...base, routeMode: 'only-listed' }, 'b.example'), false, 'only-listed: an unchecked host goes direct')
+  assert.equal(shouldProxy({ ...base, routeMode: 'except-listed' }, 'b.example'), true, 'except-listed: an unchecked host goes upstream')
+  assert.equal(shouldProxy({ ...base, routeMode: 'except-listed' }, 'a.example'), false, 'except-listed: a checked host connects directly')
+  assert.equal(
+    shouldProxy({ ...base, routeMode: 'except-listed', upstream: { ...base.upstream, enabled: false } }, 'b.example'),
+    false,
+    'disabled upstream never proxies in except-listed mode',
+  )
+  assert.equal(shouldProxy({ ...base, routeMode: 'except-listed' }, '127.0.0.1'), false, 'loopback stays direct in except-listed mode')
+  assert.equal(normalizeRouteMode('except-listed'), 'except-listed', 'a stored except-listed rule survives')
+  assert.equal(normalizeRouteMode('nonsense'), 'only-listed', 'an unknown route mode falls back to only-listed, never to all-upstream')
+  assert.equal(defaultProxyConfig().routeMode, 'only-listed', 'the default rule proxies nothing until asked')
+
+  const rulePath = join(work, 'rule.json')
+  writeProxyConfig(rulePath, { routeMode: 'except-listed' })
+  assert.equal(readProxyConfig(rulePath).routeMode, 'except-listed', 'the rule round-trips through proxy.json')
+  writeProxyConfig(rulePath, {})
+  assert.equal(readProxyConfig(rulePath).routeMode, 'except-listed', 'a save that omits the rule keeps it')
+  writeProxyConfig(rulePath, { routeMode: 'nonsense' })
+  assert.equal(readProxyConfig(rulePath).routeMode, 'only-listed', 'a garbage rule is stored as the safe default')
+}
+
 // ── scenario 15: fixed listen port (what the launch environment names) ──────
 // Why: dsh installs its egress policy from the LAUNCH environment before any
 // plugin mounts, so the only way the harness's OWN requests (model calls) ride
@@ -593,11 +630,11 @@ writeCfg({
 
   const cfgPath = join(work, 'listen.json')
   assert.equal(readProxyConfig(cfgPath).listenPort, 0, 'missing proxy.json -> ephemeral listen port')
-  writeProxyConfig(cfgPath, {}, [], 12345)
+  writeProxyConfig(cfgPath, { listenPort: 12345 })
   assert.equal(readProxyConfig(cfgPath).listenPort, 12345, 'written listen port is stored and read back')
-  writeProxyConfig(cfgPath, {}, [])
+  writeProxyConfig(cfgPath, {})
   assert.equal(readProxyConfig(cfgPath).listenPort, 12345, 'a save that omits the port keeps the stored one')
-  writeProxyConfig(cfgPath, {}, [], 'nonsense')
+  writeProxyConfig(cfgPath, { listenPort: 'nonsense' })
   assert.equal(readProxyConfig(cfgPath).listenPort, 0, 'garbage port normalizes to ephemeral')
   writeFileSync(cfgPath, JSON.stringify({ listenPort: 99999 }))
   assert.equal(readProxyConfig(cfgPath).listenPort, 0, 'out-of-range STORED port normalizes to ephemeral')
@@ -639,5 +676,5 @@ proxy.close()
 up.srv.close()
 o1.srv.close()
 rmSync(work, { recursive: true, force: true })
-console.log('PASS — proxy-core (15 scenarios)')
+console.log('PASS — proxy-core (16 scenarios)')
 process.exit(0)

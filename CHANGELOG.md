@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.13] - 2026-10-06
+
+### Added
+
+- **Routing rule: "only checked hosts" (default) or "everything except
+  checked".** The second reading exists for setups whose local proxy already
+  does its own filtering — there, ticking every host is busywork. The rule lives
+  in `proxy.json` as `routeMode` (`only-listed` | `except-listed`), flips the
+  meaning of the SAME checkbox list, and changes the list title ("hosts going
+  through the proxy" ↔ "hosts staying direct") so the screen never contradicts
+  the rule. An unreadable stored value falls back to the default — the safe
+  direction, never "send everything upstream" (G22).
+
+### Changed
+
+- The page copy was rewritten for plainness and length: the egress block is now
+  one short sentence per state instead of a paragraph of mechanism, protocol
+  hints and empty-state texts were trimmed, and four strings nothing rendered
+  were deleted. Two real i18n defects fell out of that pass: the per-host route
+  labels ("via upstream" / "direct") and the protocol labels were hard-coded
+  English, so Chinese users saw English in the middle of a Chinese page; both now
+  come from the dictionary.
+- Pointing the upstream at this plugin's own port now says so on the page
+  (previously only the routing guard silently ignored it).
+
 ## [0.1.12] - 2026-10-06
 
 ### Changed

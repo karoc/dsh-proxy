@@ -12,7 +12,8 @@ plus a **Settings page** dedicated to model-provider proxying.
 
 It runs a loopback forward proxy inside the dsh host process, points the
 process's egress traffic at it (`HTTP(S)_PROXY` + `NODE_USE_ENV_PROXY`), and
-routes **only the hosts you select** through an optional upstream proxy
+routes the hosts you select through an optional upstream proxy (or, with one
+click, every host **except** the ones you select)
 (HTTP / HTTPS / SOCKS5, with optional Basic auth). Everything else stays
 direct. Model-provider hosts are read LIVE from your running dsh
 configuration, and hosts observed in traffic are collected for you — both
@@ -39,6 +40,9 @@ external **Model reasoning** page. It shows:
   button (a SOCKS5 handshake for SOCKS5, a `CONNECT` probe for HTTP; an HTTPS
   upstream is only checked for TCP reachability — its TLS handshake is not
   verified);
+- a **routing rule** with two readings of the same checkbox list — *only checked
+  hosts* (default) or *everything except checked*, for setups whose local proxy
+  already does its own routing;
 - a **model providers** list — hosts read LIVE from your running dsh
   configuration (`llm-deepseek.baseURL`, `llm-pi-ai.providers.<n>.baseURL`, any
   `llm-*` namespace), labeled with the friendly display name where available.

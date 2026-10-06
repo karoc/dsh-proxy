@@ -202,8 +202,10 @@ async function run() {
       op: 'save',
       upstream: { enabled: true, protocol: 'socks5', host: 'proxy.example', port: 1080, username: 'a', password: 'b', extra: 'x' },
       proxiedHosts: ['API.DeepSeek.com,', '  example.org  ', ''],
+      routeMode: 'except-listed',
     })
     assert.equal(status, 200, 'save 200')
+    assert.equal(body.routeMode, 'except-listed', 'the routing rule round-trips through the API')
     assert.equal(body.upstream.enabled, true, 'saved upstream enabled')
     assert.equal(body.upstream.protocol, 'socks5', 'saved protocol')
     assert.equal(body.upstream.host, 'proxy.example', 'saved host')

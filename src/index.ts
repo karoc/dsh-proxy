@@ -36,6 +36,7 @@ import { createPolicyImporter, installInProcessEgress, type EgressOutcome, type 
 import {
   createForwardProxy,
   readProxyConfig,
+  type RouteMode,
   resolveProviderHosts,
   testUpstreamProxy,
   writeProxyConfig,
@@ -123,6 +124,8 @@ export interface ProxyView {
   egressDetail: string | null
   upstream: UpstreamConfig
   proxiedHosts: string[]
+  /** Which way `proxiedHosts` reads (see RouteMode). */
+  routeMode: RouteMode
   knownHosts: string[]
   /** Hosts observed by the running proxy this session (live). */
   hosts: string[]
@@ -235,6 +238,7 @@ function viewOf(forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[
     egressDetail: policy.detail,
     upstream: cfg.upstream,
     proxiedHosts: cfg.proxiedHosts,
+    routeMode: cfg.routeMode,
     knownHosts: cfg.knownHosts,
     hosts: forwardProxy.hosts(),
     providers: providers(),
@@ -358,6 +362,7 @@ function registerWebApi(
         upstream?: unknown
         proxiedHosts?: string[]
         listenPort?: unknown
+        routeMode?: unknown
       }
       try {
         body = JSON.parse(raw) as typeof body
@@ -368,13 +373,13 @@ function registerWebApi(
       switch (body.op) {
         case 'save': {
           try {
-            const cfg = writeProxyConfig(
-              proxyConfigPath(),
-              body.upstream,
-              Array.isArray(body.proxiedHosts) ? body.proxiedHosts : [],
-              body.listenPort,
-            )
-            sendJson(res, 200, { ...viewOf(forwardProxy, providers, launch, egress), upstream: cfg.upstream, proxiedHosts: cfg.proxiedHosts })
+            const cfg = writeProxyConfig(proxyConfigPath(), {
+              upstream: body.upstream,
+              ...Array.isArray(body.proxiedHosts) ? { proxiedHosts: body.proxiedHosts } : {},
+              listenPort: body.listenPort,
+              routeMode: body.routeMode,
+            })
+            sendJson(res, 200, { ...viewOf(forwardProxy, providers, launch, egress), upstream: cfg.upstream, proxiedHosts: cfg.proxiedHosts, routeMode: cfg.routeMode })
           } catch (error) {
             sendJson(res, 400, { ok: false, error: `dsh-proxy: save failed: ${(error as Error).message}` })
           }

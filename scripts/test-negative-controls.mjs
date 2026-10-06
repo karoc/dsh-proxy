@@ -217,6 +217,41 @@ const scenarios = [
       writeFileSync(p, after)
     },
   },
+  {
+    // Routing that ignores the rule would silently invert what the page promises
+    // ("checked hosts go upstream") for everyone using the except-listed mode.
+    name: 'routing ignores the except-listed rule',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /except-listed: an unchecked host goes upstream/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        "  return normalizeRouteMode(cfg?.routeMode) === 'except-listed' ? !listed : listed",
+        '  return listed',
+      )
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer applies the routing rule')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // A stored value nobody understands must not be read as "proxy everything".
+    name: 'an unknown routing rule becomes all-upstream',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /an unknown route mode falls back to only-listed, never to all-upstream/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      // "just trust whatever was stored": the realistic version of this defect,
+      // and narrow enough that the first failing assertion is the intended one.
+      const after = before.replace(
+        "  return value === 'except-listed' ? 'except-listed' : 'only-listed'",
+        "  return (value ?? 'only-listed') as RouteMode",
+      )
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer fails safe on an unknown rule')
+      writeFileSync(p, after)
+    },
+  },
 ]
 
 let failed = 0
