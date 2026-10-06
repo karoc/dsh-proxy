@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.8] - 2026-10-06
+
+### Fixed
+
+- **`scripts/verify-tooltip.mjs` could report "no tooltip bubble" for reasons
+  that have nothing to do with the tooltip.** Two of them: (1) the target row can
+  sit below the fold — the host list is a scrollable box inside a panel that grew
+  (the new egress block sits above it), so the synthetic mouse moved to a
+  coordinate nothing occupied; (2) the bubble wrapper only exists after React has
+  seen the injected narrowing (ResizeObserver → setState → re-render), so a hover
+  that lands too early finds nothing. The script now scrolls the target into
+  view and fails loudly when it is not on screen (with the measured `y`), and it
+  retries the hover a bounded three times; the assertion itself is unchanged, so
+  it can still only pass when the bubble really appears.
+
 ## [0.1.7] - 2026-10-06
 
 ### Fixed

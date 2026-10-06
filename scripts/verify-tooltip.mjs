@@ -56,7 +56,7 @@ try {
   let mode = 'natural layout'
   if (!state.some((s) => s.overflowing)) {
     await page.addStyleTag({ content: '.dsh-proxy-host-label { max-width: 160px !important; }' })
-    await page.waitForTimeout(400)
+    await page.waitForTimeout(700)
     state = await measure()
     mode = 'forced narrow (no label truncates at this width)'
   }
@@ -66,20 +66,53 @@ try {
   check('at least one real label truncates at this width', overflowed.length > 0, `${overflowed.length} overflowing — ${mode}`)
   check('no native title attribute used', state.every((s) => !s.hasTitle), 'title-free')
 
-  if (overflowed.length > 0) {
-    const pos = await page.evaluate(() => {
-      const el = [...document.querySelectorAll('.dsh-proxy-host-label')].find((e) => e.scrollWidth > e.clientWidth + 1)
-      const r = el.getBoundingClientRect()
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
-    })
-    await page.mouse.move(pos.x, pos.y, { steps: 4 })
-    await page.waitForTimeout(900) // delayMs 300 + render
+  // A hover test is only meaningful on a row that is actually ON SCREEN: the
+  // host list is a scrollable box inside a panel that keeps growing (the egress
+  // block above it), so the first truncated row can sit below the fold — the
+  // mouse would move to a coordinate nothing occupies and the bubble would
+  // "not appear" for a reason that has nothing to do with the tooltip.
+  const hoverPoint = (selector) => page.evaluate((which) => {
+    const els = [...document.querySelectorAll('.dsh-proxy-host-label')]
+    const el = which === 'overflowing'
+      ? els.find((e) => e.scrollWidth > e.clientWidth + 1)
+      : els.find((e) => (e.textContent ?? '').trim() === which)
+    if (!el) return null
+    el.scrollIntoView({ block: 'center' })
+    const r = el.getBoundingClientRect()
+    return {
+      x: r.x + r.width / 2,
+      y: r.y + r.height / 2,
+      onScreen: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth,
+      text: (el.textContent ?? '').trim(),
+    }
+  }, selector)
 
-    const bubble = await page.evaluate(() => {
+  if (overflowed.length > 0) {
+    const pos = await hoverPoint('overflowing')
+    check('truncated label is on screen for the hover test', pos !== null && pos.onScreen, pos === null ? 'no truncated label found' : `y=${Math.round(pos.y)} onScreen=${pos.onScreen}`)
+    const readBubble = () => page.evaluate(() => {
       const tips = [...document.querySelectorAll('[role="tooltip"]')]
       return tips.length > 0 ? { text: (tips[0].textContent ?? '').trim(), side: tips[0].getAttribute('data-side') } : null
     })
-    check('custom tooltip bubble appears on hover', bubble !== null, bubble?.side ?? 'no bubble')
+
+    // The tooltip only attaches after React has seen the injected narrowing
+    // (ResizeObserver -> setState -> re-render with the bubble wrapper), so the
+    // first hover can land before the wrapper exists. Retry a bounded number of
+    // times — the assertion is unchanged, it just stops racing the render.
+    let bubble = null
+    let attempts = 0
+    while (bubble === null && attempts < 3) {
+      attempts += 1
+      await page.mouse.move(pos.x, pos.y, { steps: 4 })
+      await page.waitForTimeout(800) // delayMs 300 + render
+      bubble = await readBubble()
+      if (bubble === null) {
+        // Leave first: a second hover on an unchanged point may not re-trigger.
+        await page.mouse.move(5, 5)
+        await page.waitForTimeout(150)
+      }
+    }
+    check('custom tooltip bubble appears on hover', bubble !== null, bubble?.side ?? `no bubble after ${attempts} hover attempt(s)`)
     if (bubble !== null) {
       // element.textContent is the FULL label (CSS ellipsis hides the tail,
       // it does not remove it), so the bubble must carry every character of it.
@@ -94,13 +127,8 @@ try {
   }
 
   if (short) {
-    const pos = await page.evaluate((needle) => {
-      const el = [...document.querySelectorAll('.dsh-proxy-host-label')].find((e) => (e.textContent ?? '').trim() === needle)
-      if (!el) return null
-      const r = el.getBoundingClientRect()
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
-    }, short.text.trim())
-    if (pos) {
+    const pos = await hoverPoint(short.text.trim())
+    if (pos !== null && pos.onScreen) {
       await page.mouse.move(pos.x, pos.y, { steps: 3 })
       await page.waitForTimeout(500)
       const n = await page.evaluate(() => [...document.querySelectorAll('[role="tooltip"]')].length)
