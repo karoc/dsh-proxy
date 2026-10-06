@@ -34,7 +34,7 @@ try {
   })
   await page.waitForTimeout(1500)
 
-  const state = await page.evaluate(() => {
+  const measure = () => page.evaluate(() => {
     const labels = [...document.querySelectorAll('.dsh-proxy-host-label')]
     return labels.map((el) => ({
       text: (el.textContent ?? '').trim(),
@@ -42,10 +42,28 @@ try {
       hasTitle: el.hasAttribute('title'),
     }))
   })
+
+  let state = await measure()
   check('provider rows rendered', state.length > 0, `${state.length} rows`)
+
+  // Whether any label truncates depends on the CONTENT (longest provider/host
+  // label vs the panel width), so it cannot be assumed: with content that fits,
+  // the checks below used to skip themselves and this script reported a failure
+  // it could not explain. Measure naturally first; if nothing truncates, force a
+  // narrow label box so the behavior under test — truncated label → bubble with
+  // the FULL text — is exercised on every run. The detail line says which mode
+  // produced the evidence.
+  let mode = 'natural layout'
+  if (!state.some((s) => s.overflowing)) {
+    await page.addStyleTag({ content: '.dsh-proxy-host-label { max-width: 160px !important; }' })
+    await page.waitForTimeout(400)
+    state = await measure()
+    mode = 'forced narrow (no label truncates at this width)'
+  }
+
   const overflowed = state.filter((s) => s.overflowing)
   const short = state.find((s) => !s.overflowing)
-  check('at least one real label truncates at this width', overflowed.length > 0, `${overflowed.length} overflowing`)
+  check('at least one real label truncates at this width', overflowed.length > 0, `${overflowed.length} overflowing — ${mode}`)
   check('no native title attribute used', state.every((s) => !s.hasTitle), 'title-free')
 
   if (overflowed.length > 0) {

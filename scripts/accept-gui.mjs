@@ -22,6 +22,10 @@ const check = (name, ok, detail = '') => {
 //    served under the boot manifest's scoped id with a rev query
 //    (/plugins/??@karoc/dsh-proxy/client.js&rev=<rev>); resolve the entry URL
 //    from the boot HTML exactly as the GUI does, then fetch it.
+//    The manifest value may be ROOT-RELATIVE WITHOUT a leading slash
+//    (`plugins/??…`), which the browser resolves against the page URL — so
+//    resolve it the same way instead of concatenating, or this check reports a
+//    false red on a GUI that is actually fine.
 const bundleUrl = await (async () => {
   try {
     const cookie = mintBrowserCookie()
@@ -29,7 +33,7 @@ const bundleUrl = await (async () => {
     const idx = html.indexOf('__DSH_BOOT__')
     const chunk = idx >= 0 ? html.slice(idx, idx + 200000) : ''
     const match = chunk.match(/\{"id":"@karoc\/dsh-proxy","url":"([^"]+)"/)
-    return match ? match[1] : null
+    return match ? new URL(match[1], ORIGIN).toString() : null
   } catch {
     return null
   }
@@ -39,9 +43,9 @@ if (bundleUrl === null) {
 } else {
   try {
     const cookie = mintBrowserCookie()
-    const res = await fetch(`${ORIGIN}${bundleUrl}`, { headers: { cookie: `${cookie.name}=${cookie.value}` } })
+    const res = await fetch(bundleUrl, { headers: { cookie: `${cookie.name}=${cookie.value}` } })
     const text = await res.text()
-    check('plugin client bundle served', res.ok && text.length > 0, `HTTP ${res.status}, ${text.length} bytes`)
+    check('plugin client bundle served', res.ok && text.length > 0, `HTTP ${res.status}, ${text.length} bytes @ ${bundleUrl.replace(ORIGIN, '')}`)
   } catch (e) {
     check('plugin client bundle served', false, e.message)
   }

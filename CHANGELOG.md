@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.6] - 2026-10-06
+
+### Fixed
+
+- **`npm run accept` reported a false red on a healthy GUI.** The boot manifest
+  can hand out a ROOT-RELATIVE bundle URL with no leading slash
+  (`plugins/??@karoc/dsh-proxy/client.js&rev=…`); `scripts/accept-gui.mjs`
+  concatenated it onto the origin and asked for
+  `http://127.0.0.1:3080plugins/…`, so "plugin client bundle served" failed while
+  the GUI was rendering the plugin correctly. The URL is now resolved the way the
+  browser resolves it (`new URL(bundleUrl, ORIGIN)`), and the check prints the
+  path it actually fetched.
+
+- **`scripts/verify-tooltip.mjs` skipped its own assertions.** Whether any host
+  label truncates depends on the content (longest provider/host label vs the
+  panel width), so on a page whose labels all fit the script failed its
+  precondition and silently skipped the hover checks — a red that explained
+  nothing and verified nothing. It now measures the natural layout first and, when
+  nothing truncates, forces a narrow label box so the behavior under test
+  (truncated label → bubble carrying the FULL text) runs on every invocation; the
+  detail line names which mode produced the evidence.
+
+### Note
+
+- Acceptance tooling only: `scripts/` is outside the published `files` list, so
+  no runtime behavior changed. Both fixes make the acceptance entry points
+  truthful on dsh 0.2.
+
 ## [0.1.5] - 2026-10-06
 
 ### Fixed
