@@ -42,6 +42,10 @@ export const PROXY_STYLES = `
 .dsh-proxy-note-warn { border-color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-border-l3)); color: var(--dsw-alias-label-primary); }
 .dsh-proxy-snippet { padding: 8px 10px; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.6; word-break: break-all; user-select: all; }
 .dsh-proxy-port { width: 180px; }
+.dsh-proxy-disclosure { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 4px 8px; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 12px; cursor: pointer; }
+.dsh-proxy-disclosure:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-proxy-disclosure[aria-expanded="true"] svg { transform: rotate(180deg); }
+.dsh-proxy-diag { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 12px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l3); }
 .dsh-proxy-heading { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; }
 .dsh-proxy-heading h4 { margin: 0; font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
 .dsh-proxy-heading .dsh-proxy-count { font-size: 11px; color: var(--dsw-alias-label-tertiary); }

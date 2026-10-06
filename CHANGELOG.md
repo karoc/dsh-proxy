@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.11] - 2026-10-06
+
+### Changed
+
+- **The listen port is no longer presented as a setting.** It never was one:
+  `listenPort` defaults to `0`, which means the plugin asks the OS for a free
+  port, and a port that cannot be bound already falls back to an ephemeral one
+  and reports it. Only a deployment whose LAUNCHER must name the address in
+  advance needs a fixed value — and even then an unconfigured plugin adopts the
+  loopback port that launcher declares. The settings page now reflects that:
+  the primary line states the state ("in-process traffic rides this proxy"), the
+  port and the `Environment=` line live in a **collapsed diagnostics panel** that
+  opens by itself only when something needs attention (a launcher proxy owning
+  egress, a failed self-install, an unbindable port, a port awaiting a
+  restart), and the port field is labelled optional with the reason spelled out.
+
+- A page served by a newer client bundle against an older host half (the window
+  before a restart) now says so instead of rendering `undefined` into the status
+  text.
+
 ## [0.1.10] - 2026-10-06
 
 ### Fixed

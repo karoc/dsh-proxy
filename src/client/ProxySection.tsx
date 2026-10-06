@@ -220,6 +220,12 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [listenPort, setListenPort] = useState('')
+  // The listen port is an implementation detail, not a setting: this panel stays
+  // collapsed unless something needs the user's attention (a launcher owning
+  // egress, a failed self-install, a port that could not be bound, or a
+  // configured port awaiting a restart).
+  const [advancedOpen, setAdvancedOpen] = useState<boolean | undefined>(undefined)
+  const [adoptedPort, setAdoptedPort] = useState(false)
   const [proxied, setProxied] = useState<Set<string>>(new Set())
 
   /** Load the config view from /proxy/api. */
@@ -235,6 +241,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
       setUsername(data.upstream.username)
       setPassword(data.upstream.password)
       setListenPort(data.listenPort > 0 ? String(data.listenPort) : '')
+      setAdoptedPort(data.listenPort === 0 && data.portRequested > 0)
       setProxied(new Set(data.proxiedHosts))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -341,6 +348,15 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
   // The port a launch environment must name: the configured fixed port, or the
   // one currently bound when the user has not fixed it yet.
   const launchPort = (view?.listenPort ?? 0) > 0 ? view!.listenPort : view?.port ?? 0
+  // Opened automatically only when the normal (self-installed, auto-port) state
+  // is not what is happening — otherwise this stays a collapsed diagnostic.
+  const diagnosticsNeedAttention = view !== undefined && (
+    view.egressStatus === undefined
+    || view.egressStatus !== 'self-installed'
+    || (!view.portHonored && view.portRequested > 0)
+    || (view.listenPort > 0 && view.listenPort !== view.portRequested)
+  )
+  const diagnosticsOpen = advancedOpen ?? diagnosticsNeedAttention
 
   return (
     <div className="dsh-proxy-section">
@@ -403,20 +419,16 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
           ? null
           : (
             <div className="dsh-proxy-egress">
-              <div className={`dsh-proxy-note ${view.inProcessRouted ? 'dsh-proxy-note-ok' : 'dsh-proxy-note-warn'}`}>
-                {(view.inProcessRouted
-                  ? (view.egressStatus === 'launcher' ? t('egressRoutedLauncher') : t('egressRoutedSelf'))
-                  : (view.egressStatus === 'launcher' ? t('egressLauncherOther') : t('egressUnavailable')))
-                  .replace('{port}', String(view.port ?? ''))
-                  .replace('{proxy}', String(view.launchProxy ?? ''))
-                  .replace('{detail}', String(view.egressDetail ?? ''))}
+              <div className={`dsh-proxy-note ${view.egressStatus === undefined ? '' : view.inProcessRouted ? 'dsh-proxy-note-ok' : 'dsh-proxy-note-warn'}`}>
+                {view.egressStatus === undefined
+                  ? t('egressUnknown')
+                  : (view.inProcessRouted
+                    ? (view.egressStatus === 'launcher' ? t('egressRoutedLauncher') : t('egressRoutedSelf'))
+                    : (view.egressStatus === 'launcher' ? t('egressLauncherOther') : t('egressUnavailable')))
+                    .replace('{port}', String(view.port ?? ''))
+                    .replace('{proxy}', String(view.launchProxy ?? ''))
+                    .replace('{detail}', String(view.egressDetail ?? ''))}
               </div>
-              {!view.inProcessRouted && view.egressStatus === 'unavailable' && (
-                <>
-                  <p>{t('egressSnippetLabel')}</p>
-                  <div className="dsh-proxy-snippet">{`Environment="HTTP_PROXY=http://127.0.0.1:${launchPort}" "HTTPS_PROXY=http://127.0.0.1:${launchPort}" "ALL_PROXY=http://127.0.0.1:${launchPort}" "NO_PROXY=127.0.0.1,localhost,::1" "NODE_USE_ENV_PROXY=1"`}</div>
-                </>
-              )}
               {!view.portHonored && view.portRequested > 0 && (
                 <div className="dsh-proxy-note dsh-proxy-note-warn">
                   {t('portFallback').replace('{requested}', String(view.portRequested)).replace('{bound}', String(view.port ?? '?'))}
@@ -427,18 +439,41 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
                   {t('portRestartPending').replace('{listenPort}', String(view.listenPort)).replace('{port}', String(view.port ?? '?'))}
                 </div>
               )}
-              <div className="dsh-proxy-row">
-                <span className="dsh-proxy-proto">{t('listenPortLabel')}</span>
-                <Input
-                  className="dsh-proxy-port"
-                  placeholder={t('listenPortPlaceholder')}
-                  value={listenPort}
-                  onChange={(e) => { setListenPort(e.target.value); setSaved(false) }}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-              <p>{t('listenPortHint')}</p>
+              <button
+                type="button"
+                className="dsh-proxy-disclosure"
+                aria-expanded={diagnosticsOpen}
+                onClick={() => { setAdvancedOpen(!diagnosticsOpen) }}
+              >
+                <IconChevronDownOutlineRegular />
+                {t('advancedToggle')}
+              </button>
+              {diagnosticsOpen && (
+                <div className="dsh-proxy-diag">
+                  <div className="dsh-proxy-note">
+                    {(adoptedPort ? t('listenAddressAdopted') : t('listenAddress')).replace('{port}', String(view.port ?? '?'))}
+                  </div>
+                  <p>{t('diagHint')}</p>
+                  {view.egressStatus === 'unavailable' && (
+                    <>
+                      <p>{t('egressSnippetLabel')}</p>
+                      <div className="dsh-proxy-snippet">{`Environment="HTTP_PROXY=http://127.0.0.1:${launchPort}" "HTTPS_PROXY=http://127.0.0.1:${launchPort}" "ALL_PROXY=http://127.0.0.1:${launchPort}" "NO_PROXY=127.0.0.1,localhost,::1" "NODE_USE_ENV_PROXY=1"`}</div>
+                    </>
+                  )}
+                  <div className="dsh-proxy-row">
+                    <span className="dsh-proxy-proto">{t('listenPortLabel')}</span>
+                    <Input
+                      className="dsh-proxy-port"
+                      placeholder={t('listenPortPlaceholder')}
+                      value={listenPort}
+                      onChange={(e) => { setListenPort(e.target.value); setSaved(false) }}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                  <p>{t('listenPortHint')}</p>
+                </div>
+              )}
             </div>
           )}
       </div>

@@ -150,7 +150,9 @@ The proxy has two kinds of clients, and they are wired differently:
 Settings → Smoothly Proxy states which of the following is true:
 
 - **routed, self-installed** — the normal case: model traffic follows the host
-  checkboxes above, per host.
+  checkboxes above, per host. The listen port is an ephemeral one the plugin
+  picks itself: there is nothing to configure, and the diagnostics panel (collapsed
+  unless something needs attention) only reports it for debugging.
 - **routed, launch environment** — your launcher declared
   `HTTP_PROXY=http://127.0.0.1:<listenPort>`, so dsh installed the policy before
   the plugin did; set `listenPort` (`proxy.json`) to a fixed port to keep that
