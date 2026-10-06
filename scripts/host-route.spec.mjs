@@ -66,11 +66,15 @@ const liveDocument = () => ({ namespaces: [
   { ns: 'llm-deepseek', value: { baseURL: 'https://api.deepseek.com/anthropic' } },
 ] })
 let settingsService = { describe: () => liveDocument() }
+// The harness connection service, when the composition has one: this is the door
+// /api sits behind, and the plugin route must sit behind the same one.
+let connectionService
 const disposers = []
 const ctx = {
   get(key) {
     if (key === 'webServer') return webServer
     if (key === 'settings') return settingsService
+    if (key === 'connection') return connectionService
     return undefined
   },
   effect(fn) {
@@ -100,7 +104,7 @@ const api = async (method, body) => {
 
 try {
   await run()
-  console.log('PASS — host apply + /proxy/api (8 scenarios)')
+  console.log('PASS — host apply + /proxy/api (9 scenarios)')
   process.exit(0)
 } finally {
   server.close()
@@ -234,6 +238,26 @@ async function run() {
     assert.equal(body.ok, false, 'dead upstream reports ok:false')
     assert.ok(body.detail.length > 0, 'test has a detail message')
     assert.ok(Date.now() - start < 8000, 'test fails fast (no hang)')
+  }
+
+  // ── the operator-session gate, when the composition has the service ───────
+  {
+    connectionService = { admit: () => ({ rejection: 401 }) }
+    const unauthenticated = await api('GET')
+    assert.equal(unauthenticated.status, 401, '/proxy/api requires the operator session when the connection service exists')
+    assert.equal((await api('POST', { op: 'persist' })).status, 401, 'a write is refused the same way')
+
+    connectionService = { admit: () => ({ rejection: 403 }) }
+    assert.equal((await api('GET')).status, 403, 'a rejected fence is reported as 403')
+
+    connectionService = { admit: () => ({ peer: { id: 'operator' } }) }
+    assert.equal((await api('GET')).status, 200, 'an admitted caller is served normally')
+
+    connectionService = { admit: () => { throw new Error('no secret loaded') } }
+    assert.equal((await api('GET')).status, 200, 'an admission failure does not take the settings page down')
+
+    connectionService = undefined
+    assert.equal((await api('GET')).status, 200, 'without the service there is no credential model to consult')
   }
 
   // ── POST op=forget: the observed-host list can be cleared ────────────────

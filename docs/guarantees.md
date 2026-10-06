@@ -36,3 +36,6 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G24 | CONNECT 的 `[v6]:port` 只把方括号当 authority 语法：`[::1]` 目标恒直连**且不留下 `[` 这种垃圾主机名**，远端 IPv6 目标走上游时保留方括号形式 | `a bracketed loopback CONNECT never reaches the upstream` |
 | G25 | SOCKS5 上游对 IPv6 目标使用 **ATYP=4 + 16 字节地址**（压缩写法、全写、内嵌 IPv4、zone id 都能展开），绝不把 IPv6 字面量当域名发出去 | `socks5: IPv6 target is sent as ATYP=4 with 16 address bytes` |
 | G26 | 「清空观测列表」**同时清空会话内已观测集合**——否则下一次持久化会把刚清掉的条目写回 `proxy.json`（按钮看起来"没生效"） | `forgetHosts clears the live set so the next persist cannot write the cleared hosts back` |
+| G27 | `/proxy/api` 与 harness 自带 `/api` **同一道门**：组合里存在 `connection` 服务时，未经浏览器会话鉴权的调用既不能读也不能改（401/403）；鉴权服务自身报错时不得因此让设置页不可用（放行而不是 500） | `/proxy/api requires the operator session when the connection service exists` |
+| G28 | 配置文件损坏、被手工改坏或读到半写内容时**沿用上次成功解析的配置**，绝不静默退回默认值（默认值会关掉上游，把本该走代理的流量全部直连） | `a broken config file keeps the last good config instead of disabling the upstream` |
+| G29 | 转发代理**只绑 loopback**：断言的是 OS 实际回报的监听地址（不是代码里传的常量），并且非 loopback 接口上必须连不上——否则它会变成对全网开放的代理，还会替别人带上注入的凭据 | `the forward proxy binds loopback only` |

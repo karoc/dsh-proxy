@@ -28,6 +28,7 @@ import {
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { en } from './locales.ts'
+import { normalizeHostForMatch } from '../host-match.ts'
 
 /** Which way the checked hosts read: the ones to proxy, or the ones to leave direct. */
 export type RouteMode = 'only-listed' | 'except-listed'
@@ -240,6 +241,10 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
 
   const [view, setView] = useState<ProxyView | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
+  // Kept apart from the save/test error: a failed LOAD has no settings to show,
+  // and reporting it as "save failed" (as one shared slot did) points the reader
+  // at the wrong control — an expired session is the common cause.
+  const [loadError, setLoadError] = useState<string | undefined>(undefined)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -269,6 +274,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
       const data = await proxyApi<ProxyView>()
       setView(data)
       setError(undefined)
+      setLoadError(undefined)
       setEnabled(data.upstream.enabled)
       setProtocol(data.upstream.protocol)
       setHost(data.upstream.host)
@@ -280,7 +286,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
       setRouteMode(data.routeMode ?? 'only-listed')
       setProxied(new Set(data.proxiedHosts))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setLoadError(err instanceof Error ? err.message : String(err))
     }
   }, [])
 
@@ -397,8 +403,13 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
     && /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost|::1)$/i.test(view.upstream.host.trim())
     && view.upstream.port === view.port
   const upstreamUsable = view?.upstream.enabled === true && !selfLoop
+  // Compare NORMALIZED hosts: the same target reaches these lists as `[::1]` from
+  // a provider baseURL and as `::1` from a CONNECT authority, and the host half
+  // matches them as one host — a row must not read "direct" while traffic is
+  // actually going upstream.
+  const routedHosts = new Set([...proxied].map((h) => normalizeHostForMatch(h)))
   const isRouted = (host: string): boolean => upstreamUsable
-    && (routeMode === 'except-listed' ? !proxied.has(host) : proxied.has(host))
+    && (routeMode === 'except-listed' ? !routedHosts.has(normalizeHostForMatch(host)) : routedHosts.has(normalizeHostForMatch(host)))
 
   const providerFiltered = providerHosts.filter((e) => match(e.label))
   const otherFiltered = otherHosts.filter((e) => match(e.label))
@@ -579,7 +590,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
                 key={e.host}
                 host={e.host}
                 label={e.label}
-                checked={proxied.has(e.host)}
+                checked={routedHosts.has(normalizeHostForMatch(e.host))}
                 routed={isRouted(e.host)}
                 onToggle={toggleHost}
                 t={t}
@@ -607,7 +618,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
                 key={e.host}
                 host={e.host}
                 label={e.label}
-                checked={proxied.has(e.host)}
+                checked={routedHosts.has(normalizeHostForMatch(e.host))}
                 routed={isRouted(e.host)}
                 onToggle={toggleHost}
                 t={t}
@@ -635,6 +646,11 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
         </Button>
         {saved && <span className="dsh-proxy-status dsh-proxy-status-ok">{t('saveStatus')}</span>}
         {error !== undefined && <span className="dsh-proxy-status dsh-proxy-status-err">{t('saveFailed')} {error}</span>}
+        {loadError !== undefined && (
+          <span className="dsh-proxy-status dsh-proxy-status-err">
+            {/unauthorized|forbidden|40[13]/.test(loadError) ? t('sessionExpired') : `${t('loadFailed')} ${loadError}`}
+          </span>
+        )}
       </div>
     </div>
   )

@@ -51,9 +51,22 @@ if (bundleUrl === null) {
   }
 }
 
-// 2. /proxy/api route live (host half).
+// 2. /proxy/api route live (host half). It sits behind the SAME operator-session
+// gate as the harness /api (G27), so the check must carry the browser cookie —
+// and that the unauthenticated request is refused is checked right after.
 try {
-  const res = await fetch(`${ORIGIN}/proxy/api`)
+  const unauthenticated = await fetch(`${ORIGIN}/proxy/api`)
+  check(
+    '/proxy/api refuses an unauthenticated caller',
+    unauthenticated.status === 401 || unauthenticated.status === 403,
+    `HTTP ${unauthenticated.status}`,
+  )
+} catch (e) {
+  check('/proxy/api refuses an unauthenticated caller', false, e.message)
+}
+try {
+  const cookie = mintBrowserCookie()
+  const res = await fetch(`${ORIGIN}/proxy/api`, { headers: { cookie: `${cookie.name}=${cookie.value}` } })
   const body = await res.json().catch(() => ({}))
   check('/proxy/api route live', res.ok && body.ok === true, `HTTP ${res.status}, upstream.enabled=${body?.upstream?.enabled}`)
 } catch (e) {

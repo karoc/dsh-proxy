@@ -12,8 +12,8 @@
 // network involved.
 import { createServer, request as httpRequest } from 'node:http'
 import { connect, createServer as netCreateServer } from 'node:net'
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, readdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import {
@@ -116,6 +116,25 @@ const httpViaProxy = (path) => new Promise((resolvePromise, rejectPromise) => {
   req.on('error', rejectPromise)
   req.end()
 })
+
+// ── scenario 0: the listener is loopback-only (never an open proxy) ─────────
+// Why: the whole plugin assumes a loopback listener; dropping the host argument
+// from `listen` would expose the forward proxy (and the credentials it injects)
+// to the entire network, and nothing else in the suite would notice.
+{
+  assert.equal(proxy.address(), '127.0.0.1', 'the forward proxy binds loopback only')
+  const foreign = Object.values(networkInterfaces()).flat()
+    .find((entry) => entry !== undefined && entry.family === 'IPv4' && !entry.internal)
+  if (foreign !== undefined) {
+    const refused = await new Promise((resolvePromise) => {
+      const socket = connect({ host: foreign.address, port: proxyPort })
+      socket.on('connect', () => { socket.destroy(); resolvePromise(false) })
+      socket.on('error', () => resolvePromise(true))
+      setTimeout(() => { socket.destroy(); resolvePromise(false) }, 3000)
+    })
+    assert.equal(refused, true, `the proxy is unreachable on a non-loopback interface (${foreign.address})`)
+  }
+}
 
 // ── scenario 1: direct HTTP forwarding (no upstream configured) ─────────────
 writeCfg({ upstream: { enabled: false, host: '', port: 0 }, proxiedHosts: ['example.com'], knownHosts: [] })
@@ -491,6 +510,34 @@ writeCfg({
   s5.close()
 }
 
+// ── scenario 11b: a torn or broken config must not silently re-route ───────
+// Why: one accidentally broken edit (or a read landing inside a non-atomic write)
+// used to parse as "no config", which disables the upstream and sends everything
+// direct — the failure mode is invisible precisely when it matters.
+{
+  const file = join(work, 'atomic.json')
+  writeProxyConfig(file, {
+    upstream: { enabled: true, protocol: 'http', host: 'up.example', port: 8080, username: '', password: '' },
+    proxiedHosts: ['a.example'],
+  })
+  const good = readProxyConfig(file)
+  assert.equal(good.upstream.host, 'up.example', 'the config round-trips through the atomic write')
+  assert.ok(
+    !readdirSync(work).some((name) => name.includes('.tmp-')),
+    'the atomic write leaves no temp file behind',
+  )
+
+  writeFileSync(file, '{ this is not json')
+  const after = readProxyConfig(file)
+  assert.equal(after.upstream.host, 'up.example', 'a broken config file keeps the last good config instead of disabling the upstream')
+  assert.equal(after.upstream.enabled, true, '…and does not silently disable the upstream')
+  assert.deepEqual(
+    readProxyConfig(join(work, 'never-existed.json')),
+    defaultProxyConfig(),
+    'a config that never parsed still yields defaults',
+  )
+}
+
 // ── scenario 12b: IPv6 text -> 16 wire bytes (SOCKS5 ATYP=4) ────────────────
 {
   assert.equal(ipv6ToBytes('::1').toString('hex'), '00000000000000000000000000000001', '::1 expands')
@@ -812,5 +859,5 @@ proxy.close()
 up.srv.close()
 o1.srv.close()
 rmSync(work, { recursive: true, force: true })
-console.log('PASS — proxy-core (16 scenarios)')
+console.log('PASS — proxy-core (17 scenarios)')
 process.exit(0)

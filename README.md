@@ -226,7 +226,7 @@ src/client/index.ts   # client apply: register settings.section (id dsh-proxy)
 src/client/ProxySection.tsx  # the settings page (upstream card + host lists)
 src/client/styles.ts  # design-token styles (--dsw-alias-*) + injection
 src/client/locales.ts # en/zh copy
-scripts/*.spec.mjs    # behavioral tests: proxy-core.ts (13 scenarios) plus
+scripts/*.spec.mjs    # behavioral tests: proxy-core.ts plus
                       # host route / client boot / cordis mount — no network
 ```
 
@@ -235,10 +235,27 @@ scripts/*.spec.mjs    # behavioral tests: proxy-core.ts (13 scenarios) plus
 The host half serves the settings page over a same-origin HTTP route (the
 built-in `/api` prefix is reserved for the gateway, so this uses `/proxy/api`):
 
-- `GET  /proxy/api` → `{ ok, upstream, proxiedHosts, knownHosts, hosts, providers, port }`
-- `POST /proxy/api` `{ op: 'save', upstream, proxiedHosts }` → sanitized + persisted config
+- `GET  /proxy/api` → `{ ok, upstream, proxiedHosts, knownHosts, hosts, providers,
+  port, routeMode, … }` plus the egress diagnostics the panel reports
+- `POST /proxy/api` `{ op: 'save', upstream, proxiedHosts, listenPort?, routeMode? }`
+  → sanitized + persisted config
 - `POST /proxy/api` `{ op: 'test', upstream }` → `{ ok, detail }`
 - `POST /proxy/api` `{ op: 'persist' }` → merge observed hosts into `knownHosts`
+- `POST /proxy/api` `{ op: 'forget' }` → clear the observed-host list (live set +
+  `knownHosts`)
+
+**It sits behind the same operator-session gate as the harness's own `/api`**
+(401/403 without the browser cookie) — the route exposes the upstream address and
+credentials and can rewrite the routing, and on a shared machine any local process
+can reach 127.0.0.1. A CLI check therefore has to carry that cookie:
+
+```sh
+COOKIE=$(node -e "import('./scripts/lib/auth-cookie.mjs').then(m=>{const c=m.mintBrowserCookie();console.log(c.name+'='+c.value)})")
+curl -s -H "cookie: $COOKIE" http://127.0.0.1:3080/proxy/api | head -c 200
+```
+
+In a composition without the harness connection service there is no credential
+model to consult, so the route stays open as before.
 
 ## Build
 
@@ -246,7 +263,7 @@ built-in `/api` prefix is reserved for the gateway, so this uses `/proxy/api`):
 pnpm install
 pnpm bundle          # emits lib/index.js + lib/client.js
 pnpm typecheck        # tsc --noEmit
-pnpm test             # node --test: proxy-core (13 scenarios) + host-route /
+pnpm test             # node --test: proxy-core + host-route /
                       # client-boot / cordis-mount specs (no network)
 pnpm release:check   # release gate: docs/changelog/tag/tree/build/registry must all pass
 pnpm publish         # runs the gate (prepack/prepublishOnly), then postpublish verifies the live release

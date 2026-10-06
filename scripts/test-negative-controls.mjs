@@ -258,10 +258,11 @@ const scenarios = [
     name: 'a bracketed IPv6 loopback stops being loopback',
     command: 'node --test scripts/proxy-core.spec.mjs',
     // The mutation is caught by the first assertion it reaches: the provider list
-    // must not offer a bracketed loopback endpoint.
+    // must not offer a bracketed loopback endpoint. The matcher lives in
+    // src/host-match.ts (shared with the client half).
     expect: /IPv6 loopback endpoints are never offered/,
     mutate: (dir) => {
-      const p = join(dir, 'src/proxy-core.ts')
+      const p = join(dir, 'src/host-match.ts')
       const before = readFileSync(p, 'utf8')
       const after = before.replace(
         "  const bare = String(host ?? '').trim().toLowerCase().replace(/^\\[|\\]$/g, '')",
@@ -333,6 +334,51 @@ const scenarios = [
       const before = readFileSync(p, 'utf8')
       const after = before.replace('      seenHosts.clear()\n      if (notifyTimer) clearTimeout(notifyTimer)', '      if (notifyTimer) clearTimeout(notifyTimer)')
       if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer clears the live observed set')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // Dropping the gate exposes the upstream credentials and the routing to any
+    // local process, which is exactly what the harness /api door prevents.
+    name: 'the proxy route skips the operator-session gate',
+    command: 'node scripts/host-route.spec.mjs',
+    expect: /\/proxy\/api requires the operator session when the connection service exists/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/index.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace('      if (rejection !== undefined) {', '      if (false) {')
+      if (after === before) throw new Error('mutation did not apply — src/index.ts no longer gates the settings route')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // Falling back to defaults on a broken read silently disables the upstream —
+    // the traffic that was meant to be proxied goes direct instead.
+    name: 'a broken config falls back to defaults instead of the last good one',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /a broken config file keeps the last good config instead of disabling the upstream/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        '    return lastGoodConfig.get(configFile) ?? defaultProxyConfig()',
+        '    return defaultProxyConfig()',
+      )
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer caches the last good config')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // Binding without a host exposes the forward proxy (and the upstream
+    // credentials it injects) to the whole network.
+    name: 'the forward proxy binds every interface',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /the forward proxy binds loopback only/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace("server.listen(candidate, '127.0.0.1')", 'server.listen(candidate)')
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer pins the listen host')
       writeFileSync(p, after)
     },
   },

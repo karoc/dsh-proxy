@@ -8,7 +8,8 @@ model-provider proxying.
 ```sh
 pnpm install        # dev deps (tsdown, typescript, react types)
 pnpm typecheck      # tsc --noEmit
-pnpm test           # node --test: proxy-core (13 scenarios) + host-route /
+pnpm test           # node --test: proxy-core + host-route / client-boot / cordis-mount
+                    # (each spec prints its own scenario count)
                     # client-boot / cordis-mount specs (no external network)
 pnpm bundle         # emit lib/index.js + lib/client.js
 ```

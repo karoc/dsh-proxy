@@ -32,58 +32,15 @@ import { createServer, request as httpRequest } from 'node:http'
 import { connect as tcpConnect, isIPv6, type Socket } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
 import type { Duplex } from 'node:stream'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, renameSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import {
+  formatAuthority, isLoopbackHost, normalizeHostForMatch, parseConnectAuthority,
+} from './host-match.ts'
 
-const LOOPBACK = /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost|::1|0\.0\.0\.0)$/i
-
-/**
- * Normalize a host as it arrives from different places so ONE loopback test
- * covers all of them: `new URL('http://[::1]:1/').hostname` is `[::1]` (brackets
- * included), Node normalizes an IPv4-mapped literal to `::ffff:7f00:1`, and a
- * CONNECT authority is `[::1]:443`. Historically only the bare `::1` counted, so
- * a bracketed or mapped loopback target could be sent to the upstream proxy —
- * contradicting the guaranteed "loopback is always direct".
- */
-export function normalizeHostForMatch(host: string): string {
-  const bare = String(host ?? '').trim().toLowerCase().replace(/^\[|\]$/g, '')
-  // Dotted spelling, as written by hand or by an IPv4-mapped literal.
-  const dotted = bare.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
-  if (dotted !== null) return dotted[1]
-  // Hex spelling, which is what Node's URL parser produces.
-  const mapped = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
-  if (mapped === null) return bare
-  const hi = Number.parseInt(mapped[1], 16)
-  const lo = Number.parseInt(mapped[2], 16)
-  return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join('.')
-}
-
-/** Whether `host` is a loopback/unspecified target in any of its spellings. */
-export function isLoopbackHost(host: string): boolean {
-  return LOOPBACK.test(normalizeHostForMatch(host))
-}
-
-/**
- * Split a CONNECT authority into the routing host and port. `[v6]:port` keeps
- * its brackets around the ADDRESS only — `split(':')` turned the whole thing
- * into host `[`, which both polluted the observed-host list and defeated the
- * loopback test.
- */
-export function parseConnectAuthority(authority: string): { host: string; port: number } | null {
-  const value = String(authority ?? '')
-  const match = value.match(/^\[([^\]]+)\](?::(\d+))?$/) ?? value.match(/^([^:]+):(\d+)$/)
-  if (match === null) return null
-  const host = match[1].trim().toLowerCase()
-  if (host === '') return null
-  const port = Number(match[2])
-  return { host, port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : 443 }
-}
-
-/** Format a host:port for an HTTP request line / Host header (brackets for IPv6). */
-export function formatAuthority(host: string, port: number): string {
-  const bare = String(host ?? '').trim()
-  return bare.includes(':') ? `[${bare}]:${port}` : `${bare}:${port}`
-}
+// Re-exported so the host half (and its specs) keep one import site for the
+// matching rules; the browser bundle imports ./host-match directly.
+export { formatAuthority, isLoopbackHost, normalizeHostForMatch, parseConnectAuthority } from './host-match.ts'
 
 /** Upstream proxy protocol, defaulting to http (legacy configs have no field). */
 export function upstreamProtocol(cfg: ProxyConfig): string {
@@ -288,18 +245,45 @@ export function defaultProxyConfig(): ProxyConfig {
 }
 
 /** Read <configFile> (proxy.json), tolerant of a missing/corrupt file. */
+const lastGoodConfig = new Map<string, ProxyConfig>()
+
+/**
+ * Write a file so that a concurrent reader can never observe a half-written
+ * document: the bytes land in a sibling temp file first and `rename` swaps it in
+ * atomically. Without this, a read landing between truncate and write parses as
+ * broken and the request it belongs to falls back to the DEFAULT config — the
+ * upstream silently stops being used for that request.
+ */
+function writeFileAtomic(file: string, text: string): void {
+  const temp = `${file}.tmp-${process.pid}`
+  try {
+    writeFileSync(temp, text)
+    renameSync(temp, file)
+  } catch (error) {
+    try { unlinkSync(temp) } catch { /* temp never created */ }
+    throw error
+  }
+}
+
+/** Read + sanitize proxy.json, remembering the last document that parsed. */
 export function readProxyConfig(configFile: string): ProxyConfig {
   try {
     const raw = JSON.parse(readFileSync(configFile, 'utf8')) as Partial<ProxyConfig>
-    return {
+    const cfg: ProxyConfig = {
       ...defaultProxyConfig(),
       ...(raw ?? {}),
       upstream: { ...defaultProxyConfig().upstream, ...(raw?.upstream ?? {}) },
       listenPort: normalizeListenPort(raw?.listenPort),
       routeMode: normalizeRouteMode(raw?.routeMode),
     }
+    lastGoodConfig.set(configFile, cfg)
+    return cfg
   } catch {
-    return defaultProxyConfig()
+    // Missing (first run), deleted or hand-edited into a syntax error. Falling
+    // back to defaults would silently disable the upstream — one accidentally
+    // broken edit would send every request direct — so the last document that
+    // parsed wins, and only a genuinely never-readable file yields defaults.
+    return lastGoodConfig.get(configFile) ?? defaultProxyConfig()
   }
 }
 
@@ -532,6 +516,13 @@ export function createForwardProxy(opts: {
   requestedPort: number
   /** Whether the requested port is the one actually bound. */
   portHonored: () => boolean
+  /**
+   * The address the OS actually bound (loopback by construction). Exposed so a
+   * test can assert the real socket address instead of trusting the constant this
+   * module passes to `listen` — an accidental drop of the host argument would
+   * turn this into an open proxy for the whole network.
+   */
+  address: () => string | null
   hosts: () => string[]
   config: () => ProxyConfig
   persistKnownHosts: () => void
@@ -728,6 +719,7 @@ export function createForwardProxy(opts: {
     port,
     requestedPort,
     portHonored: () => requestedPort > 0 && boundPort === requestedPort,
+    address: () => (server.address() as { address?: string } | null)?.address ?? null,
     hosts: () => [...seenHosts].sort(),
     config,
     /** Merge observed hosts into proxy.json's knownHosts (UI candidate list). */
@@ -735,7 +727,7 @@ export function createForwardProxy(opts: {
       try {
         const cfg = config()
         const merged = [...new Set([...(cfg.knownHosts ?? []), ...seenHosts])].sort()
-        writeFileSync(configFile, JSON.stringify({ ...cfg, knownHosts: merged }, null, 2) + '\n')
+        writeFileAtomic(configFile, JSON.stringify({ ...cfg, knownHosts: merged }, null, 2) + '\n')
       } catch (e) {
         log(`proxy: persist known hosts failed: ${(e as Error).message}`)
       }
@@ -750,7 +742,7 @@ export function createForwardProxy(opts: {
       if (notifyTimer) clearTimeout(notifyTimer)
       try {
         const cfg = config()
-        writeFileSync(configFile, JSON.stringify({ ...cfg, knownHosts: [] }, null, 2) + '\n')
+        writeFileAtomic(configFile, JSON.stringify({ ...cfg, knownHosts: [] }, null, 2) + '\n')
       } catch (e) {
         log(`proxy: clear known hosts failed: ${(e as Error).message}`)
       }
@@ -825,7 +817,7 @@ export function writeProxyConfig(
   // Ensure the parent directory exists (a fresh DSH_HOME has no proxy.json
   // yet) — mirrors dsh-desktop's set_proxy_config create_dir_all.
   try { mkdirSync(dirname(configFile), { recursive: true }) } catch { /* already exists */ }
-  writeFileSync(configFile, text + '\n')
+  writeFileAtomic(configFile, text + '\n')
   return next
 }
 

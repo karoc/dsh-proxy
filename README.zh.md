@@ -163,7 +163,7 @@ src/client/index.ts   # client apply：注册 settings.section（id dsh-proxy）
 src/client/ProxySection.tsx  # 设置页（上游卡片 + 主机列表）
 src/client/styles.ts  # design-token 样式（--dsw-alias-*）+ 注入
 src/client/locales.ts # en/zh 文案
-scripts/*.spec.mjs    # 行为测试：proxy-core.ts（13 场景）+ host route / client
+scripts/*.spec.mjs    # 行为测试：proxy-core.ts + host route / client
                       # boot / cordis mount，全程无外部网络
 ```
 
@@ -171,10 +171,20 @@ scripts/*.spec.mjs    # 行为测试：proxy-core.ts（13 场景）+ host route 
 
 host 半区用同源 HTTP 路由为设置页供数（内置 `/api` 前缀被 gateway 占用，故用 `/proxy/api`）：
 
-- `GET  /proxy/api` → `{ ok, upstream, proxiedHosts, knownHosts, hosts, providers, port }`
-- `POST /proxy/api` `{ op: 'save', upstream, proxiedHosts }` → 清洗后持久化的配置
+- `GET  /proxy/api` → `{ ok, upstream, proxiedHosts, knownHosts, hosts, providers, port, routeMode, … }` 以及面板用到的出网诊断字段
+- `POST /proxy/api` `{ op: 'save', upstream, proxiedHosts, listenPort?, routeMode? }` → 清洗后持久化的配置
 - `POST /proxy/api` `{ op: 'test', upstream }` → `{ ok, detail }`
 - `POST /proxy/api` `{ op: 'persist' }` → 把观测主机并入 `knownHosts`
+- `POST /proxy/api` `{ op: 'forget' }` → 清空观测列表（会话内集合 + `knownHosts`）
+
+**它与 harness 自带的 `/api` 走同一道门**（没有浏览器会话 cookie 时返回 401/403）——这条路由会暴露上游地址与凭据、还能改写路由规则，而在多用户机器上任何本地进程都能访问 127.0.0.1。因此命令行自查必须带上该 cookie：
+
+```sh
+COOKIE=$(node -e "import('./scripts/lib/auth-cookie.mjs').then(m=>{const c=m.mintBrowserCookie();console.log(c.name+'='+c.value)})")
+curl -s -H "cookie: $COOKIE" http://127.0.0.1:3080/proxy/api | head -c 200
+```
+
+组合里没有 harness 的 connection 服务时，没有凭据模型可依，该路由保持原样。
 
 ## 构建
 
@@ -182,7 +192,7 @@ host 半区用同源 HTTP 路由为设置页供数（内置 `/api` 前缀被 gat
 pnpm install
 pnpm bundle          # 产出 lib/index.js + lib/client.js
 pnpm typecheck        # tsc --noEmit
-pnpm test             # node --test：proxy-core（13 场景）+ host-route /
+pnpm test             # node --test：proxy-core（16 场景）+ host-route /
                       # client-boot / cordis-mount，无外部网络
 pnpm release:check   # 发布门禁：文档/changelog/tag/工作区/构建/registry 全过
 pnpm publish         # 跑门禁（prepack/prepublishOnly），随后 postpublish 验证线上发布

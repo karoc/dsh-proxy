@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.1.17] - 2026-10-06
+
+### Security
+
+- **`/proxy/api` now sits behind the same operator-session gate as the harness's
+  own `/api`** (401/403 without the browser cookie). The route hands out the
+  upstream address and credentials and can rewrite the routing, and on a shared
+  machine any local process can reach 127.0.0.1 — the app root was gated, this
+  route was not. G27 pins it; compositions without the connection service keep
+  the previous behaviour (there is no credential model to consult there) and the
+  README says so. CLI checks need the cookie, and the recipe is in the README.
+
+### Fixed
+
+- **A broken or half-written `proxy.json` silently disabled the upstream.** Every
+  parse failure fell back to the default config, which has the upstream switched
+  off and no hosts listed — so one accidentally broken edit (or a read landing
+  inside a non-atomic write) sent the traffic that was meant to be proxied
+  straight out. Reads now keep the last document that parsed (G28), and writes go
+  through a sibling temp file plus `rename`, so a concurrent read can never
+  observe a torn file.
+
+- The settings page matched hosts by exact string, so an IPv6 host listed as
+  `[2001:db8::1]` (provider baseURL) and observed as `2001:db8::1` (CONNECT
+  authority) could read *direct* while traffic actually went upstream. Both halves
+  now share one matcher (`src/host-match.ts`), which also removes the chance of
+  the two copies drifting apart again.
+
+- **The loopback-only listener is now pinned by a gate** (G29): the assertion
+  reads the socket address the OS actually bound and, when the machine has a
+  non-loopback interface, proves the proxy is unreachable there. Dropping the host
+  argument from `listen` would have exposed the proxy — and the upstream
+  credentials it injects — to the whole network without any test noticing.
+
+- A failed LOAD of the settings data is no longer reported as "save failed": the
+  panel had one error slot, so an expired session (now that the route is gated)
+  pointed the reader at the Save button. A load failure has its own line, and a
+  401/403 says the session expired and to refresh.
+
+### Docs
+
+- README (both languages): the `/proxy/api` contract lists `op: 'forget'` and the
+  authentication requirement, with a cookie recipe for command-line checks. The
+  scenario counts are gone from README/CONTRIBUTING (they drifted twice in one
+  session); each spec prints its own count when it runs.
+
 ## [0.1.16] - 2026-10-06
 
 ### Added

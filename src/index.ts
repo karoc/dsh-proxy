@@ -339,10 +339,34 @@ function registerWebApi(
     | undefined
   if (server === undefined) return
 
+  // Same door as the harness's own /api: when this composition has the connection
+  // service, an unauthenticated caller must not read the upstream credentials or
+  // rewrite the routing — on a shared machine any local process can reach
+  // 127.0.0.1. Compositions without that service have no credential model to
+  // consult, so they behave exactly as before.
+  const admissionRejection = (req: IncomingMessage): 401 | 403 | undefined => {
+    const connection = (ctx as { get?: (name: string) => unknown }).get?.('connection') as
+      | { admit?: (request: { headers: unknown }) => { rejection?: number } }
+      | undefined
+    if (connection === undefined || typeof connection.admit !== 'function') return undefined
+    try {
+      const rejection = connection.admit(req)?.rejection
+      return rejection === 401 || rejection === 403 ? rejection : undefined
+    } catch {
+      // An admission failure must not take the settings page down with it.
+      return undefined
+    }
+  }
+
   server.register({
     kind: 'prefix',
     path: '/proxy/api',
     handler: (req, res) => {
+      const rejection = admissionRejection(req)
+      if (rejection !== undefined) {
+        sendJson(res, rejection, { ok: false, error: rejection === 401 ? 'unauthorized' : 'forbidden' })
+        return
+      }
       void handle(req, res).catch((error) => {
         if (!res.writableEnded) {
           sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) })
