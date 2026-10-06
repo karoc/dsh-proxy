@@ -32,7 +32,7 @@ const STEPS = [
   { id: 'syntax:release-check', command: 'node --check scripts/release-check.mjs' },
   { id: 'syntax:check-guarantees', command: 'node --check scripts/check-guarantees.mjs' },
   { id: 'syntax:test-negative-controls', command: 'node --check scripts/test-negative-controls.mjs' },
-  { id: 'unit+integration', command: 'tsc --noEmit && node --test scripts/proxy-core.spec.mjs scripts/egress.spec.mjs scripts/host-route.spec.mjs scripts/client-boot.spec.mjs scripts/cordis-mount.spec.mjs' },
+  { id: 'unit+integration', command: 'tsc --noEmit && node --test scripts/proxy-core.spec.mjs scripts/egress.spec.mjs scripts/host-route.spec.mjs scripts/client-boot.spec.mjs scripts/cordis-mount.spec.mjs && node scripts/packed-artifact.spec.mjs' },
   { id: 'guarantees', command: 'node scripts/check-guarantees.mjs' },
   { id: 'controls', command: 'node scripts/test-negative-controls.mjs' },
   { id: 'release-check', command: 'node scripts/release-check.mjs', documentedFailure: true },

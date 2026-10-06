@@ -39,3 +39,4 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G27 | `/proxy/api` 与 harness 自带 `/api` **同一道门**：组合里存在 `connection` 服务时，未经浏览器会话鉴权的调用既不能读也不能改（401/403）；鉴权服务自身报错时不得因此让设置页不可用（放行而不是 500） | `/proxy/api requires the operator session when the connection service exists` |
 | G28 | 配置文件损坏、被手工改坏或读到半写内容时**沿用上次成功解析的配置**，绝不静默退回默认值（默认值会关掉上游，把本该走代理的流量全部直连） | `a broken config file keeps the last good config instead of disabling the upstream` |
 | G29 | 转发代理**只绑 loopback**：断言的是 OS 实际回报的监听地址（不是代码里传的常量），并且非 loopback 接口上必须连不上——否则它会变成对全网开放的代理，还会替别人带上注入的凭据 | `the forward proxy binds loopback only` |
+| G30 | 发布产物（`npm pack` 的 tarball）**成员清单固定**、包内 `lib/*.js` 与仓库构建产物**逐字节一致**，并且能从"已安装布局"加载、起代理、供数、自装出网策略——别人装到的那份必须是验过的那份 | `the published tarball ships exactly the documented members` |

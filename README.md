@@ -228,6 +228,9 @@ src/client/styles.ts  # design-token styles (--dsw-alias-*) + injection
 src/client/locales.ts # en/zh copy
 scripts/*.spec.mjs    # behavioral tests: proxy-core.ts plus
                       # host route / client boot / cordis mount — no network
+scripts/packed-artifact.spec.mjs
+                      # what npm PUBLISHES: member set, in-tarball bundles,
+                      # installed-layout load + egress self-install
 ```
 
 ### The /proxy/api route

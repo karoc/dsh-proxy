@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.18] - 2026-10-06
+
+### Added
+
+- **A gate for what `npm publish` actually ships** (G30): the tarball's member set
+  must equal the documented file list, the `lib/*.js` inside it must be
+  byte-identical to a FRESH BUILD of the current source (so a stale bundle cannot
+  ship), and the packed host bundle is
+  loaded **from a profile-shaped install path**, where it must start its proxy,
+  serve `/proxy/api` and resolve + self-install the harness egress package
+  (through a stub, so the gate stays offline). Written while preparing the first
+  publish: every other spec exercises `src/*.ts` or the repo's own `lib/`, so a
+  `files` mistake or a stale bundle could only have surfaced in someone else's
+  install. Two negative controls keep it load-bearing (an extra shipped directory;
+  a stale in-tarball bundle).
+
+  The runtime is unchanged in this version: the bundles do not embed the version,
+  so `lib/*.js` is the same code that 0.1.17 shipped.
+
 ## [0.1.17] - 2026-10-06
 
 ### Security

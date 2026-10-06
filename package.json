@@ -1,6 +1,6 @@
 {
   "name": "@karoc/dsh-proxy",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Smoothly Proxy (思磨力代理插件): external DeepSeek Harness plugin — a model-provider forward proxy with per-host routing and a Settings page.",
   "type": "module",
   "main": "lib/index.js",
@@ -41,7 +41,7 @@
     "bundle": "tsdown --config ./tsdown.config.ts",
     "prepare": "tsdown --config ./tsdown.config.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/proxy-core.spec.mjs scripts/egress.spec.mjs scripts/host-route.spec.mjs scripts/client-boot.spec.mjs scripts/cordis-mount.spec.mjs && node scripts/check-guarantees.mjs && node scripts/test-negative-controls.mjs",
+    "test": "node --test scripts/proxy-core.spec.mjs scripts/egress.spec.mjs scripts/host-route.spec.mjs scripts/client-boot.spec.mjs scripts/cordis-mount.spec.mjs && node scripts/packed-artifact.spec.mjs && node scripts/check-guarantees.mjs && node scripts/test-negative-controls.mjs",
     "accept": "node scripts/accept-gui.mjs && node scripts/verify-tooltip.mjs",
     "release:check": "node scripts/release-check.mjs",
     "prepack": "node scripts/release-check.mjs",

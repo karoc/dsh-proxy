@@ -165,6 +165,9 @@ src/client/styles.ts  # design-token 样式（--dsw-alias-*）+ 注入
 src/client/locales.ts # en/zh 文案
 scripts/*.spec.mjs    # 行为测试：proxy-core.ts + host route / client
                       # boot / cordis mount，全程无外部网络
+scripts/packed-artifact.spec.mjs
+                      # 真正被 npm 发出去的那份：成员清单、包内产物、
+                      # 以"已安装布局"加载 + 自装出网策略
 ```
 
 ### /proxy/api 路由

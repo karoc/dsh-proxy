@@ -15,7 +15,7 @@
  * release gate's registry probe cannot turn the positive control red.
  */
 import { execFileSync, execSync } from 'node:child_process'
-import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,6 +33,18 @@ function freshClone() {
     process.exit(1)
   }
   cpSync(join(root, 'lib'), join(dir, 'lib'), { recursive: true })
+  // `git clone` carries no node_modules, but the specs assume a checkout with
+  // dependencies installed (the packed-artifact spec rebuilds with the local
+  // tsdown). Symlink instead of copying — the controls never write there, and a
+  // copy would cost hundreds of MB.
+  const modules = join(root, 'node_modules')
+  if (existsSync(modules) && !existsSync(join(dir, 'node_modules'))) {
+    symlinkSync(modules, join(dir, 'node_modules'), 'dir')
+    // .gitignore's `node_modules/` (trailing slash) does not match a SYMLINK of
+    // that name, so git would report an untracked entry and the release gate's
+    // clean-tree check would fail. Ignore it in THIS clone only.
+    appendFileSync(join(dir, '.git', 'info', 'exclude'), 'node_modules\n')
+  }
   return dir
 }
 
@@ -379,6 +391,36 @@ const scenarios = [
       const before = readFileSync(p, 'utf8')
       const after = before.replace("server.listen(candidate, '127.0.0.1')", 'server.listen(candidate)')
       if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer pins the listen host')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // The published member set is what other users receive; an extra (or missing)
+    // entry is invisible to every source-level test.
+    name: 'the published tarball ships an extra directory',
+    command: 'node scripts/packed-artifact.spec.mjs',
+    expect: /the published tarball ships exactly the documented members/,
+    mutate: (dir) => {
+      const p = join(dir, 'package.json')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace('"cordis.patch.yml",', '"cordis.patch.yml",\n    "src/index.ts",')
+      if (after === before) throw new Error('mutation did not apply — package.json no longer lists the shipped files')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // The classic "verified locally, broken for everyone else" publish failure: the
+    // source moved on but the shipped bundle was not rebuilt. The mutation has to
+    // land in src/ — this harness refreshes lib/ from the workspace, so a lib/
+    // mutation would be copied over before the spec ever packs it.
+    name: 'the shipped bundle is stale relative to the source',
+    command: 'node scripts/packed-artifact.spec.mjs',
+    expect: /the packed lib\/client\.js is byte-identical to a fresh build of this source/,
+    mutate: (dir) => {
+      const p = join(dir, 'src', 'client', 'locales.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace("othersClear: 'Clear',", "othersClear: 'Clear all',")
+      if (after === before) throw new Error('mutation did not apply — src/client/locales.ts no longer carries the label')
       writeFileSync(p, after)
     },
   },
