@@ -35,3 +35,4 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G23 | IPv6 字面量在**任何拼写**下都按 loopback 归类（`::1` / `[::1]` / `::ffff:127.0.0.1`，含 Node 归一化后的 `::ffff:7f00:1`）；且 `proxiedHosts` 匹配走归一化形态——列了 `[::1]` 也拦得住 `::1` 目标 | `every loopback spelling is loopback:` |
 | G24 | CONNECT 的 `[v6]:port` 只把方括号当 authority 语法：`[::1]` 目标恒直连**且不留下 `[` 这种垃圾主机名**，远端 IPv6 目标走上游时保留方括号形式 | `a bracketed loopback CONNECT never reaches the upstream` |
 | G25 | SOCKS5 上游对 IPv6 目标使用 **ATYP=4 + 16 字节地址**（压缩写法、全写、内嵌 IPv4、zone id 都能展开），绝不把 IPv6 字面量当域名发出去 | `socks5: IPv6 target is sent as ATYP=4 with 16 address bytes` |
+| G26 | 「清空观测列表」**同时清空会话内已观测集合**——否则下一次持久化会把刚清掉的条目写回 `proxy.json`（按钮看起来"没生效"） | `forgetHosts clears the live set so the next persist cannot write the cleared hosts back` |

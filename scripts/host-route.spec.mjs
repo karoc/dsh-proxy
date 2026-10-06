@@ -100,7 +100,7 @@ const api = async (method, body) => {
 
 try {
   await run()
-  console.log('PASS — host apply + /proxy/api (7 scenarios)')
+  console.log('PASS — host apply + /proxy/api (8 scenarios)')
   process.exit(0)
 } finally {
   server.close()
@@ -234,6 +234,14 @@ async function run() {
     assert.equal(body.ok, false, 'dead upstream reports ok:false')
     assert.ok(body.detail.length > 0, 'test has a detail message')
     assert.ok(Date.now() - start < 8000, 'test fails fast (no hang)')
+  }
+
+  // ── POST op=forget: the observed-host list can be cleared ────────────────
+  {
+    const { status, body } = await api('POST', { op: 'forget' })
+    assert.equal(status, 200, 'forget 200')
+    assert.deepEqual(body.hosts, [], 'forget empties the live observed hosts')
+    assert.deepEqual(body.knownHosts, [], 'forget empties the persisted observed hosts')
   }
 
   // ── POST unknown op → 400 ────────────────────────────────────────────────

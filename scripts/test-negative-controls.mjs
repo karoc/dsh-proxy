@@ -322,6 +322,20 @@ const scenarios = [
       writeFileSync(p, after)
     },
   },
+  {
+    // Clearing only the file leaves the session set to re-add everything on the
+    // next persist, so the control silently undoes itself.
+    name: 'clearing observed hosts leaves the live set behind',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /forgetHosts clears the live set so the next persist cannot write the cleared hosts back/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace('      seenHosts.clear()\n      if (notifyTimer) clearTimeout(notifyTimer)', '      if (notifyTimer) clearTimeout(notifyTimer)')
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer clears the live observed set')
+      writeFileSync(p, after)
+    },
+  },
 ]
 
 let failed = 0

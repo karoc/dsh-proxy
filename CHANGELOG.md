@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.16] - 2026-10-06
+
+### Added
+
+- **The observed-host list can be cleared** (*Clear* next to the heading, or
+  `POST /proxy/api {"op":"forget"}`). Until now the list only ever grew — it
+  collects everything dsh has contacted, including hosts from experiments — and
+  hand-editing `proxy.json` did not stick: the running proxy merges its own
+  session set into that file on the next persist, so removed entries came back.
+  Clearing therefore drops the session set *and* the persisted list (G26).
+
+- README: the two readings of the checkbox list now have a table and a worked
+  example each, in both languages.
+
 ## [0.1.15] - 2026-10-06
 
 ### Fixed

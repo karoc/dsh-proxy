@@ -535,6 +535,8 @@ export function createForwardProxy(opts: {
   hosts: () => string[]
   config: () => ProxyConfig
   persistKnownHosts: () => void
+  /** Drop every observed host (this session's set AND the persisted list). */
+  forgetHosts: () => void
   close: () => void
 } {
   const { configFile, onHosts, log = () => {} } = opts
@@ -737,6 +739,22 @@ export function createForwardProxy(opts: {
       } catch (e) {
         log(`proxy: persist known hosts failed: ${(e as Error).message}`)
       }
+    },
+    /**
+     * Clear the observed-host list. The session's own set is cleared too: leaving
+     * it would make the very next persist merge the just-forgotten hosts back into
+     * proxy.json, so the button would look like it did nothing.
+     */
+    forgetHosts: () => {
+      seenHosts.clear()
+      if (notifyTimer) clearTimeout(notifyTimer)
+      try {
+        const cfg = config()
+        writeFileSync(configFile, JSON.stringify({ ...cfg, knownHosts: [] }, null, 2) + '\n')
+      } catch (e) {
+        log(`proxy: clear known hosts failed: ${(e as Error).message}`)
+      }
+      onHosts?.([])
     },
     close: () => {
       if (notifyTimer) clearTimeout(notifyTimer)

@@ -270,6 +270,21 @@ writeCfg({
   const persisted = readProxyConfig(cfgFile)
   assert.ok(persisted.knownHosts.includes('api.deepseek.com'), 'knownHosts persisted into proxy.json')
   assert.ok(!persisted.knownHosts.includes('127.0.0.1'), 'loopback never lands in knownHosts')
+
+  // Clearing the list must clear the SESSION set too: a later persist merges the
+  // session set into proxy.json, so leaving it would write the just-forgotten
+  // hosts straight back and the control would look like it did nothing.
+  proxy.forgetHosts()
+  assert.deepEqual(readProxyConfig(cfgFile).knownHosts, [], 'clearing empties the persisted list')
+  // Assert the CONSEQUENCE before the intermediate state: a session set left
+  // behind is only visible once a persist merges it back.
+  proxy.persistKnownHosts()
+  assert.deepEqual(
+    readProxyConfig(cfgFile).knownHosts,
+    [],
+    'forgetHosts clears the live set so the next persist cannot write the cleared hosts back',
+  )
+  assert.deepEqual(proxy.hosts(), [], 'clearing empties the live observed set')
 }
 
 // ── scenario 9: upstream unreachable -> client gets a failure (no hang) ─────

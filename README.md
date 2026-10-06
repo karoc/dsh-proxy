@@ -78,6 +78,25 @@ dsh host process
                      upstream proxy (HTTP/HTTPS/SOCKS5, optional Basic auth)
 ```
 
+The checkboxes have two readings (**Routing rule** at the top of the list):
+
+| Rule | Checked hosts | Everything else | Pick it when |
+|---|---|---|---|
+| *Only checked hosts* (default) | go upstream | connect directly | a few providers should use the upstream |
+| *Everything except checked* | connect directly | go upstream | your local proxy already does the filtering |
+
+```
+# a few providers through the upstream
+rule: Only checked hosts        checked: new-api.example, opencode.ai
+
+# everything through the local proxy, except what must stay direct
+rule: Everything except checked checked: api.internal.example   (i.e. the direct list)
+```
+
+Either way the list title follows the rule ("hosts going through the proxy" ↔
+"hosts staying direct"), and the per-row status shows the RESULT — a host reads
+*direct* while the upstream is off, whatever the checkboxes say.
+
 Safety rules (hard-coded, not configurable):
 
 - **loopback targets are always direct** — never sent to an upstream proxy;

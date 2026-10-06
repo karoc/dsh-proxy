@@ -360,6 +360,16 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
     }
   }
 
+  /** Drop the observed-host list (live set + proxy.json) and refresh the view. */
+  const clearObserved = async (): Promise<void> => {
+    try {
+      await proxyApi({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'forget' }) })
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const test = async (): Promise<void> => {
     setTesting(true)
     setTestResult(undefined)
@@ -579,6 +589,15 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
         <div className="dsh-proxy-heading">
           <h4>{t('othersHeading')}</h4>
           <span className="dsh-proxy-count">{otherHosts.length}</span>
+          {otherHosts.length > 0 && (
+            <button
+              type="button"
+              className="dsh-proxy-disclosure"
+              onClick={() => { void clearObserved() }}
+            >
+              {t('othersClear')}
+            </button>
+          )}
         </div>
         <div className="dsh-proxy-hostlist">
           {otherFiltered.length === 0

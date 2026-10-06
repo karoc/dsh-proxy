@@ -256,6 +256,7 @@ export interface ForwardProxyHandle {
   hosts: () => string[]
   config: () => ProxyConfig
   persistKnownHosts: () => void
+  forgetHosts: () => void
   close: () => void
 }
 
@@ -295,6 +296,7 @@ function startProxy(opts: { configFile: string; launch: LaunchProxy | null; log:
     hosts: handle.hosts,
     config: handle.config,
     persistKnownHosts: handle.persistKnownHosts,
+    forgetHosts: handle.forgetHosts,
     close: () => {
       if (persistTimer) clearTimeout(persistTimer)
       handle.close()
@@ -392,6 +394,12 @@ function registerWebApi(
         }
         case 'persist': {
           try { forwardProxy.persistKnownHosts() } catch { /* best-effort */ }
+          sendJson(res, 200, viewOf(forwardProxy, providers, launch, egress))
+          return
+        }
+        case 'forget': {
+          // Clear the observed-host list (both the live set and proxy.json's).
+          try { forwardProxy.forgetHosts() } catch { /* best-effort */ }
           sendJson(res, 200, viewOf(forwardProxy, providers, launch, egress))
           return
         }
