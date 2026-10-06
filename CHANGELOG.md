@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.10] - 2026-10-06
+
+### Fixed
+
+- **A launcher-declared port is adopted instead of fought.** If your service
+  environment says `HTTP_PROXY=http://127.0.0.1:45999` (the 0.1.7 contract) while
+  `listenPort` is unset, the plugin now LISTENS on 45999 instead of binding an
+  ephemeral port and leaving dsh's already-installed policy pointed at a dead
+  address. A port that something else already serves is the exception: binding
+  fails, the plugin falls back to an ephemeral port and reports it — which is
+  also the right outcome when the launch proxy is a *different* local proxy,
+  because that one keeps owning egress.
+
+  Non-loopback and malformed launch proxies are never adopted (G20).
+
 ## [0.1.9] - 2026-10-06
 
 ### Fixed

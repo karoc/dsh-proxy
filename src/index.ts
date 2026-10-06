@@ -161,6 +161,30 @@ export function maskProxyUrl(value: string): string {
   }
 }
 
+/**
+ * The loopback port a launch proxy names, when that proxy is this plugin.
+ *
+ * A launcher that declares `HTTP_PROXY=http://127.0.0.1:<port>` did so because
+ * it expects THIS proxy to be at that address (that is the 0.1.7 contract), so an
+ * ephemeral configuration adopts it rather than leaving the launcher pointed at
+ * nothing. A port already serving something else simply fails to bind, and the
+ * plugin falls back to an ephemeral one — which is also the correct outcome when
+ * the launch proxy is a *different* local proxy, since that one keeps owning
+ * egress.
+ */
+export function launchProxyLoopbackPort(launch: LaunchProxy | null): number {
+  if (launch === null) return 0
+  try {
+    const url = new URL(launch.value)
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') return 0
+    const port = Number(url.port)
+    return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 0
+  } catch {
+    return 0
+  }
+}
+
 /** Whether a launch proxy URL addresses `port` on loopback. */
 export function launchProxyTargetsPort(launch: LaunchProxy | null, port: number | null): boolean {
   if (launch === null || port === null || port <= 0) return false
@@ -232,14 +256,19 @@ export interface ForwardProxyHandle {
 }
 
 /** Start the loopback forward proxy and re-point the process at it. */
-function startProxy(opts: { configFile: string; log: (line: string) => void }): ForwardProxyHandle {
-  const { configFile, log } = opts
+function startProxy(opts: { configFile: string; launch: LaunchProxy | null; log: (line: string) => void }): ForwardProxyHandle {
+  const { configFile, launch, log } = opts
   let currentPort: number | null = null
   let persistTimer: ReturnType<typeof setTimeout> | null = null
 
-  // The configured port is what a LAUNCHER names in its environment, so it has
-  // to be known before the proxy starts — read it here, not from the live view.
-  const requestedPort = readProxyConfig(configFile).listenPort
+  // The listen port has to be known before the proxy starts: a launcher names it
+  // in the environment, so it cannot come from the live view. An unconfigured
+  // port adopts the one the launch environment points at — that address is what
+  // the launcher (and dsh's already-installed policy) expects this proxy to be.
+  const configuredPort = readProxyConfig(configFile).listenPort
+  const adoptedPort = configuredPort > 0 ? 0 : launchProxyLoopbackPort(launch)
+  const requestedPort = configuredPort > 0 ? configuredPort : adoptedPort
+  if (adoptedPort > 0) log(`dsh-proxy: adopting the launch environment's proxy port 127.0.0.1:${adoptedPort}`)
   const handle = createForwardProxy({
     configFile,
     listenPort: requestedPort,
@@ -388,7 +417,7 @@ export function apply(ctx: Context): void {
   // before any plugin mounts, so only this snapshot says whether the harness's
   // own requests (model calls) are routed through this proxy.
   const launch = readLaunchProxy()
-  const forwardProxy = startProxy({ configFile: proxyConfigPath(), log })
+  const forwardProxy = startProxy({ configFile: proxyConfigPath(), launch, log })
 
   /**
    * Where the harness's policy package can be resolved from, most specific

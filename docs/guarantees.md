@@ -29,3 +29,4 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G17 | 「进程内流量走了本代理」**只在启动环境确实指向本监听端口**时为真——别的目标、别的端口、没有启动代理都判否，观测到的主机再多也不影响 | `launch proxy pointing elsewhere is not in-process routing` |
 | G18 | 启动环境**已声明代理**时，插件绝不 layer/抢占 egress（本插件的代理把未勾选主机直连，覆盖上去等于静默绕过启动方的策略） | `a launcher-declared proxy is never displaced by the plugin` |
 | G19 | 自装 harness 出网策略**失败必须显式报告**（页面给出启动环境兜底），绝不把"没装上"当成"已代理" | `an unresolvable policy package is reported as unavailable` |
+| G20 | 未固定端口时**采纳启动环境声明的 loopback 端口**（那是启动方期望本代理所在的地址）；非 loopback 或非法值绝不采纳 | `adoption recognises the loopback spellings` |

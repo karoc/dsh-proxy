@@ -199,6 +199,24 @@ const scenarios = [
       writeFileSync(p, after)
     },
   },
+  {
+    // Adopting a NON-loopback launch proxy would bind this plugin at an address
+    // that is not ours to serve (a corporate proxy, or a name that resolves
+    // elsewhere) — the launcher's own policy must keep owning egress.
+    name: 'a non-loopback launch proxy gets adopted as our listen port',
+    command: 'node --test scripts/host-route.spec.mjs',
+    expect: /a non-loopback launch proxy is never adopted/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/index.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        "    if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') return 0",
+        '    if (false) return 0',
+      )
+      if (after === before) throw new Error('mutation did not apply — src/index.ts no longer restricts port adoption to loopback')
+      writeFileSync(p, after)
+    },
+  },
 ]
 
 let failed = 0

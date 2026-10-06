@@ -33,10 +33,13 @@ await new Promise((r) => launchProbe.listen(0, '127.0.0.1', r))
 const launchPort = launchProbe.address().port
 await new Promise((r) => launchProbe.close(r))
 mkdirSync(home, { recursive: true })
-writeFileSync(configFile, JSON.stringify({ listenPort: launchPort }) + '\n')
+// No listenPort configured: the plugin must ADOPT the port the launch
+// environment names — that address is what dsh's already-installed policy (and
+// the launcher's contract) expects this proxy to be at.
+writeFileSync(configFile, JSON.stringify({}) + '\n')
 process.env.HTTP_PROXY = `http://user:secret@127.0.0.1:${launchPort}`
 
-const { apply, proxyConfigPath, settingsPath, launchProxyTargetsPort, maskProxyUrl } = await import('../src/index.ts')
+const { apply, proxyConfigPath, settingsPath, launchProxyTargetsPort, launchProxyLoopbackPort, maskProxyUrl } = await import('../src/index.ts')
 
 // A fake webServer: capture the registered handler and serve it on a real
 // node:http server so the test can hit it over HTTP.
@@ -124,11 +127,15 @@ async function run() {
     assert.deepEqual(body.proxiedHosts, [], 'default no proxied hosts')
     assert.ok(Array.isArray(body.providers), 'providers is a list')
     // The launch environment named this port, so dsh's own requests ride here.
-    assert.equal(body.listenPort, launchPort, 'view reports the configured fixed port')
+    assert.equal(body.listenPort, 0, 'nothing is configured: the port comes from the launch environment')
     assert.equal(body.port, launchPort, 'the proxy bound the port the launch environment names')
-    assert.equal(body.portRequested, launchPort, 'view reports the port the listener was asked for')
+    assert.equal(body.portRequested, launchPort, 'the adopted port is reported as the requested one')
     assert.equal(body.portHonored, true, 'a free fixed port is honored at runtime')
     assert.equal(body.inProcessRouted, true, 'launch environment naming this port -> in-process traffic is routed here')
+    assert.equal(launchProxyLoopbackPort({ name: 'HTTP_PROXY', value: `http://localhost:${launchPort}` }), launchPort, 'adoption recognises the loopback spellings')
+    assert.equal(launchProxyLoopbackPort({ name: 'HTTP_PROXY', value: 'http://corp.example:8080' }), 0, 'a non-loopback launch proxy is never adopted')
+    assert.equal(launchProxyLoopbackPort({ name: 'HTTP_PROXY', value: 'not a url' }), 0, 'a malformed launch proxy is never adopted')
+    assert.equal(launchProxyLoopbackPort(null), 0, 'no launch proxy -> nothing to adopt')
     assert.ok(String(body.launchProxy).includes('127.0.0.1'), 'the launch proxy is reported')
     assert.ok(!String(body.launchProxy).includes('secret'), 'launch proxy credentials never leave the process')
     // A launcher that already decides egress keeps deciding it: this plugin's

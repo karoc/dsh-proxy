@@ -422,7 +422,7 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
                   {t('portFallback').replace('{requested}', String(view.portRequested)).replace('{bound}', String(view.port ?? '?'))}
                 </div>
               )}
-              {view.listenPort !== view.portRequested && (
+              {view.listenPort > 0 && view.listenPort !== view.portRequested && (
                 <div className="dsh-proxy-note dsh-proxy-note-warn">
                   {t('portRestartPending').replace('{listenPort}', String(view.listenPort)).replace('{port}', String(view.port ?? '?'))}
                 </div>
