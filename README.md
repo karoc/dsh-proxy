@@ -92,12 +92,14 @@ Safety rules (hard-coded, not configurable):
 {
   "upstream": { "enabled": false, "protocol": "http", "host": "", "port": 0, "username": "", "password": "" },
   "proxiedHosts": ["api.deepseek.com"],
-  "knownHosts": ["api.deepseek.com", "registry.npmjs.org"]
+  "knownHosts": ["api.deepseek.com", "registry.npmjs.org"],
+  "listenPort": 45999
 }
 ```
 
-`knownHosts` is written by the plugin (observed traffic); `upstream` and
-`proxiedHosts` are written from the settings page. You can also hand-edit the
+`knownHosts` is written by the plugin (observed traffic); `upstream`,
+`proxiedHosts` and `listenPort` are written from the settings page
+(`listenPort` takes effect after a restart; `0` means an ephemeral port). You can also hand-edit the
 file while dsh runs — it is re-read live.
 
 ## Install
@@ -132,6 +134,37 @@ dsh plugin --profile web update @karoc/dsh-proxy
 ```
 
 Then **restart `dsh web`** so the new client bundle loads.
+
+### Putting dsh's own requests behind the proxy (fixed port)
+
+The proxy handles every outbound request of the process it runs in — but only the
+ones actually *routed* to it:
+
+- **Child processes** (bash, npm, pnpm, git, curl…) inherit the `*PROXY`
+  variables this plugin publishes, so they are proxied with no extra setup.
+- **dsh's own requests** (model calls, web fetch/search) are routed by the
+  harness's egress policy, which dsh installs **from the environment it was
+  LAUNCHED with, before any plugin loads**. No plugin can set that up afterwards.
+
+To put model traffic behind this proxy, name it in the launch environment. That is
+why the proxy listens on a fixed port (`listenPort` in `proxy.json`, default
+`45999`) instead of a random one:
+
+```ini
+# systemd user unit for dsh web — [Service] section
+Environment="HTTP_PROXY=http://127.0.0.1:45999" "HTTPS_PROXY=http://127.0.0.1:45999" \
+            "ALL_PROXY=http://127.0.0.1:45999" "NO_PROXY=127.0.0.1,localhost,::1" \
+            "NODE_USE_ENV_PROXY=1"
+```
+
+Then restart dsh once. **Settings → Smoothly Proxy says which of the two is in
+effect** and prints this line for your port; if the fixed port is taken, the proxy
+falls back to an ephemeral one and reports it (`portHonored: false`) — silently
+pointing a launcher at a port nothing listens on would send in-process egress
+nowhere.
+
+Prefer a single hop? Pointing the launch environment straight at your upstream
+proxy also works — you then lose per-host routing for in-process traffic.
 
 ### Removing
 

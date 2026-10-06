@@ -180,6 +180,7 @@ export function defaultProxyConfig(): ProxyConfig {
     upstream: { enabled: false, protocol: 'http', host: '', port: 0, username: '', password: '' },
     proxiedHosts: [],
     knownHosts: [],
+    listenPort: DEFAULT_LISTEN_PORT,
   }
 }
 
@@ -191,6 +192,11 @@ export function readProxyConfig(configFile: string): ProxyConfig {
       ...defaultProxyConfig(),
       ...(raw ?? {}),
       upstream: { ...defaultProxyConfig().upstream, ...(raw?.upstream ?? {}) },
+      // An existing proxy.json predates this field: it adopts the fixed default
+      // (that is what makes the launch-environment setup work without a second
+      // restart). An EXPLICIT value — including 0, meaning "ephemeral" — wins,
+      // and a garbage value degrades to ephemeral rather than blocking the bind.
+      listenPort: raw?.listenPort === undefined ? DEFAULT_LISTEN_PORT : normalizeListenPort(raw.listenPort),
     }
   } catch {
     return defaultProxyConfig()
@@ -395,16 +401,24 @@ export function shouldProxy(cfg: ProxyConfig, host: string, selfPort?: number): 
  */
 export function createForwardProxy(opts: {
   configFile: string
+  /** Port to bind; 0 (or a taken port) falls back to an ephemeral one. */
+  listenPort?: number
   onHosts?: (hosts: string[]) => void
   log?: (line: string) => void
 }): {
   port: Promise<number>
+  /** The port this instance was asked to bind (0 = ephemeral). */
+  requestedPort: number
+  /** Whether the requested port is the one actually bound. */
+  portHonored: () => boolean
   hosts: () => string[]
   config: () => ProxyConfig
   persistKnownHosts: () => void
   close: () => void
 } {
   const { configFile, onHosts, log = () => {} } = opts
+  const requestedPort = normalizeListenPort(opts.listenPort ?? 0)
+  let boundPort: number | null = null
   const seenHosts = new Set<string>()
   let notifyTimer: NodeJS.Timeout | null = null
 
@@ -552,12 +566,44 @@ export function createForwardProxy(opts: {
     }
   })
 
+  /**
+   * Bind the listen port. A FIXED port is what lets the LAUNCH environment name
+   * this proxy (see {@link DEFAULT_LISTEN_PORT}) — dsh installs its egress policy
+   * from that environment before plugins mount, so the port must be predictable
+   * in advance. A taken fixed port falls back to an ephemeral one instead of
+   * failing the plugin: children keep working through the env vars this process
+   * publishes, and `portHonored()` reports that a launcher naming the fixed port
+   * now points at nothing (an in-process egress failure the settings page must
+   * state out loud rather than leave to guesswork).
+   */
   const port = new Promise<number>((resolve) => {
-    server.listen(0, '127.0.0.1', () => resolve((server.address() as { port: number }).port))
+    const listen = (candidate: number, isFallback: boolean): void => {
+      const onError = (error: NodeJS.ErrnoException) => {
+        server.removeListener('listening', onListening)
+        if (candidate > 0 && !isFallback) {
+          log(`proxy: listen port ${candidate} unavailable (${error.code ?? error.message}) — falling back to an ephemeral port; a launcher pointing at ${candidate} will not reach this proxy`)
+          listen(0, true)
+          return
+        }
+        log(`proxy: listen failed: ${error.message}`)
+        resolve(0)
+      }
+      const onListening = () => {
+        server.removeListener('error', onError)
+        boundPort = (server.address() as { port: number } | null)?.port ?? 0
+        resolve(boundPort)
+      }
+      server.once('error', onError)
+      server.once('listening', onListening)
+      server.listen(candidate, '127.0.0.1')
+    }
+    listen(requestedPort, false)
   })
 
   return {
     port,
+    requestedPort,
+    portHonored: () => requestedPort > 0 && boundPort === requestedPort,
     hosts: () => [...seenHosts].sort(),
     config,
     /** Merge observed hosts into proxy.json's knownHosts (UI candidate list). */
@@ -616,14 +662,21 @@ export function sanitizeUpstream(v: unknown): UpstreamConfig {
  * arbitrary keys). Takes effect immediately: the running proxy re-reads
  * proxy.json on every request.
  */
-export function writeProxyConfig(configFile: string, upstream: unknown, proxiedHosts: string[]): ProxyConfig {
+export function writeProxyConfig(configFile: string, upstream: unknown, proxiedHosts: string[], listenPort?: unknown): ProxyConfig {
   const cfg = readProxyConfig(configFile)
   const hosts: string[] = []
   for (const h of proxiedHosts ?? []) {
     const t = normalizeHost(h)
     if (t !== '') hosts.push(t)
   }
-  const next: ProxyConfig = { ...cfg, upstream: sanitizeUpstream(upstream), proxiedHosts: hosts }
+  const next: ProxyConfig = {
+    ...cfg,
+    upstream: sanitizeUpstream(upstream),
+    proxiedHosts: hosts,
+    // Omitted -> keep what was stored: a save that only edits the upstream must
+    // not silently move the port a launcher already points at.
+    listenPort: listenPort === undefined ? cfg.listenPort : normalizeListenPort(listenPort),
+  }
   const text = JSON.stringify(next, null, 2)
   // Ensure the parent directory exists (a fresh DSH_HOME has no proxy.json
   // yet) — mirrors dsh-desktop's set_proxy_config create_dir_all.
@@ -762,4 +815,34 @@ export interface ProxyConfig {
   upstream: UpstreamConfig
   proxiedHosts: string[]
   knownHosts: string[]
+  /**
+   * Port the forward proxy listens on: a FIXED port so a launcher can name it
+   * in the process environment, or 0 for an ephemeral one. dsh resolves its
+   * egress policy from the LAUNCH environment before any plugin mounts, so a
+   * fixed port is what lets in-process traffic (model requests) ride this proxy
+   * — see {@link DEFAULT_LISTEN_PORT}.
+   */
+  listenPort: number
+}
+
+/**
+ * Default listen port. Fixed rather than ephemeral so the launch environment can
+ * name this proxy without a restart dance: `HTTP_PROXY=http://127.0.0.1:45999`
+ * (plus `HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) in the service environment, and
+ * dsh installs an egress policy pointing here at boot — which is what routes the
+ * harness's OWN requests (model calls, web fetch) through this proxy. Children
+ * already inherit the environment and need no fixed port.
+ *
+ * When the port is taken the proxy falls back to an ephemeral one and SAYS SO
+ * (`portHonored: false` in the view), so a launcher that named 45999 can see why
+ * in-process egress is failing instead of guessing.
+ */
+export const DEFAULT_LISTEN_PORT = 45999
+
+/** Coerce a stored/edited listen port: integer 1..65535, anything else -> 0 (ephemeral). */
+export function normalizeListenPort(value: unknown): number {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN
+  if (!Number.isFinite(n)) return 0
+  const port = Math.trunc(n)
+  return port >= 1 && port <= 65535 ? port : 0
 }

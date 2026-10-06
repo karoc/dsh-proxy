@@ -25,3 +25,5 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G13 | loopback 的**提供方主机永不作为代理目标出现**（勾选也永远不会生效——路由恒直连），live/legacy 两条路径一致 | `loopback provider hosts are never offered as proxy targets` |
 | G14 | 提供方列表以**实时 settings 文档**为准；存在遗留 `settings.yaml` 时也不会用它覆盖 live（防止陈旧数据复活） | `live settings document wins over a stale legacy settings.yaml` |
 | G15 | settings 读取**失败或服务缺席**时 `/proxy/api` 仍返回 200 并回退到 legacy 文档，不把设置页打挂 | `a throwing settings read keeps GET /proxy/api at 200` |
+| G16 | 固定监听端口被占用时**回退到随机端口并显式报告**（`portHonored:false` + 日志点名该端口），绝不静默让启动环境指向空端口 | `requested listen port taken -> falls back and reports it` |
+| G17 | 「进程内流量走了本代理」**只在启动环境确实指向本监听端口**时为真——别的目标、别的端口、没有启动代理都判否，观测到的主机再多也不影响 | `launch proxy pointing elsewhere is not in-process routing` |

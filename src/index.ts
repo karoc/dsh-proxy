@@ -34,6 +34,7 @@ import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   createForwardProxy,
+  readProxyConfig,
   resolveProviderHosts,
   testUpstreamProxy,
   writeProxyConfig,
@@ -98,7 +99,23 @@ function readBody(req: IncomingMessage): Promise<string> {
  */
 export interface ProxyView {
   ok: boolean
+  /** Port actually bound (null until the listener is up). */
   port: number | null
+  /** Listen port in proxy.json now (0 = ephemeral); a change needs a restart. */
+  listenPort: number
+  /** Port the RUNNING listener was asked to bind. */
+  portRequested: number
+  /** Whether the running listener got the port it asked for. */
+  portHonored: boolean
+  /** Proxy URL the LAUNCH environment named, if any (credentials masked). */
+  launchProxy: string | null
+  /**
+   * Whether that launch proxy points at THIS listener — the condition under
+   * which dsh's own in-process requests (model calls, web fetch/search) ride
+   * this proxy. False means they are NOT routed through it, whatever the
+   * observed-host list below happens to show.
+   */
+  inProcessRouted: boolean
   upstream: UpstreamConfig
   proxiedHosts: string[]
   knownHosts: string[]
@@ -106,6 +123,52 @@ export interface ProxyView {
   hosts: string[]
   /** [{name, host, displayName?}] from the active settings entries' llm-* values. */
   providers: ProviderHost[]
+}
+
+/** Environment names a launcher may have used to point dsh at a proxy, in resolution order. */
+const LAUNCH_PROXY_NAMES = ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'] as const
+
+/** The proxy the LAUNCH environment named, captured before this plugin rewrites the variables. */
+export interface LaunchProxy { name: string; value: string }
+
+/**
+ * Read the launch-time proxy variable, before {@link startProxy} publishes this
+ * plugin's own values into the environment. dsh resolves its egress policy from
+ * the launch environment BEFORE plugins mount, so this snapshot is the only
+ * evidence of whether the harness's own requests are routed here.
+ */
+function readLaunchProxy(): LaunchProxy | null {
+  for (const name of LAUNCH_PROXY_NAMES) {
+    const value = process.env[name]
+    if (typeof value === 'string' && value.trim() !== '') return { name, value: value.trim() }
+  }
+  return null
+}
+
+/** Mask credentials in a proxy URL before it leaves the process (the page shows this). */
+export function maskProxyUrl(value: string): string {
+  try {
+    const url = new URL(value)
+    if (url.username !== '' || url.password !== '') {
+      url.username = '***'
+      url.password = '***'
+    }
+    return url.toString()
+  } catch {
+    return value.replace(/\/\/[^@/]*@/, '//***:***@')
+  }
+}
+
+/** Whether a launch proxy URL addresses `port` on loopback. */
+export function launchProxyTargetsPort(launch: LaunchProxy | null, port: number | null): boolean {
+  if (launch === null || port === null || port <= 0) return false
+  try {
+    const url = new URL(launch.value)
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    return (host === '127.0.0.1' || host === 'localhost' || host === '::1') && url.port === String(port)
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -130,11 +193,17 @@ function liveSettingsDocument(ctx: Context): unknown {
 }
 
 /** Build the fresh settings view. */
-function viewOf(forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[]): ProxyView {
+function viewOf(forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[], launch: LaunchProxy | null): ProxyView {
   const cfg = forwardProxy.config()
+  const port = forwardProxy.currentPort
   return {
     ok: true,
-    port: forwardProxy.currentPort,
+    port,
+    listenPort: cfg.listenPort,
+    portRequested: forwardProxy.requestedPort,
+    portHonored: forwardProxy.portHonored(),
+    launchProxy: launch === null ? null : maskProxyUrl(launch.value),
+    inProcessRouted: launchProxyTargetsPort(launch, port),
     upstream: cfg.upstream,
     proxiedHosts: cfg.proxiedHosts,
     knownHosts: cfg.knownHosts,
@@ -147,6 +216,10 @@ function viewOf(forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[
 export interface ForwardProxyHandle {
   port: Promise<number>
   currentPort: number | null
+  /** Port this instance was asked to bind (0 = ephemeral). */
+  requestedPort: number
+  /** Whether the requested port is the one bound. */
+  portHonored: () => boolean
   hosts: () => string[]
   config: () => ProxyConfig
   persistKnownHosts: () => void
@@ -159,8 +232,12 @@ function startProxy(opts: { configFile: string; log: (line: string) => void }): 
   let currentPort: number | null = null
   let persistTimer: ReturnType<typeof setTimeout> | null = null
 
+  // The configured port is what a LAUNCHER names in its environment, so it has
+  // to be known before the proxy starts — read it here, not from the live view.
+  const requestedPort = readProxyConfig(configFile).listenPort
   const handle = createForwardProxy({
     configFile,
+    listenPort: requestedPort,
     onHosts: (hosts) => {
       // Debounced persist of observed hosts into proxy.json (UI candidate list).
       if (persistTimer) clearTimeout(persistTimer)
@@ -175,6 +252,8 @@ function startProxy(opts: { configFile: string; log: (line: string) => void }): 
   const wrapped: ForwardProxyHandle = {
     port: handle.port,
     currentPort,
+    requestedPort: handle.requestedPort,
+    portHonored: handle.portHonored,
     hosts: handle.hosts,
     config: handle.config,
     persistKnownHosts: handle.persistKnownHosts,
@@ -185,8 +264,14 @@ function startProxy(opts: { configFile: string; log: (line: string) => void }): 
   }
 
   void handle.port.then((port) => {
+    if (port <= 0) {
+      // Nothing is listening: publishing HTTP_PROXY would send every child to a
+      // dead port. Stay out of the environment and say so.
+      log('dsh-proxy: forward proxy could not bind any port — leaving the environment untouched')
+      return
+    }
     wrapped.currentPort = port
-    log(`dsh-proxy: forward proxy on 127.0.0.1:${port}`)
+    log(`dsh-proxy: forward proxy on 127.0.0.1:${port}${handle.portHonored() ? '' : ` (requested ${handle.requestedPort}; a launcher pointing at it will not reach this proxy)`}`)
     // The process's single egress point. NODE_USE_ENV_PROXY makes undici's
     // global fetch honor the *PROXY vars; child CLIs inherit them natively.
     process.env.NODE_USE_ENV_PROXY = '1'
@@ -202,7 +287,7 @@ function startProxy(opts: { configFile: string; log: (line: string) => void }): 
 }
 
 /** Register the /proxy/api route (GET view, POST save/test/persist). */
-function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[]): void {
+function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[], launch: LaunchProxy | null): void {
   const server = ctx.get('webServer') as
     | { register: (route: { kind: 'prefix'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }) => () => void }
     | undefined
@@ -223,7 +308,7 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, provider
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = req.method ?? 'GET'
     if (method === 'GET') {
-      sendJson(res, 200, viewOf(forwardProxy, providers))
+      sendJson(res, 200, viewOf(forwardProxy, providers, launch))
       return
     }
     if (method === 'POST') {
@@ -232,6 +317,7 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, provider
         op?: string
         upstream?: unknown
         proxiedHosts?: string[]
+        listenPort?: unknown
       }
       try {
         body = JSON.parse(raw) as typeof body
@@ -246,8 +332,9 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, provider
               proxyConfigPath(),
               body.upstream,
               Array.isArray(body.proxiedHosts) ? body.proxiedHosts : [],
+              body.listenPort,
             )
-            sendJson(res, 200, { ...viewOf(forwardProxy, providers), upstream: cfg.upstream, proxiedHosts: cfg.proxiedHosts })
+            sendJson(res, 200, { ...viewOf(forwardProxy, providers, launch), upstream: cfg.upstream, proxiedHosts: cfg.proxiedHosts })
           } catch (error) {
             sendJson(res, 400, { ok: false, error: `dsh-proxy: save failed: ${(error as Error).message}` })
           }
@@ -260,7 +347,7 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, provider
         }
         case 'persist': {
           try { forwardProxy.persistKnownHosts() } catch { /* best-effort */ }
-          sendJson(res, 200, viewOf(forwardProxy, providers))
+          sendJson(res, 200, viewOf(forwardProxy, providers, launch))
           return
         }
         default:
@@ -285,6 +372,11 @@ export function apply(ctx: Context): void {
     } catch { /* noop */ }
   }
 
+  // Snapshot the LAUNCH environment BEFORE startProxy publishes this plugin's
+  // own values into it: dsh installs its egress policy from that environment
+  // before any plugin mounts, so only this snapshot says whether the harness's
+  // own requests (model calls) are routed through this proxy.
+  const launch = readLaunchProxy()
   const forwardProxy = startProxy({ configFile: proxyConfigPath(), log })
   // Read the provider list per request: a settings edit (add/rename a provider
   // route) reaches the page on the next load, like every other value here.
@@ -292,7 +384,7 @@ export function apply(ctx: Context): void {
     live: liveSettingsDocument(ctx),
     legacyPath: settingsPath(),
   })
-  registerWebApi(ctx, forwardProxy, providers)
+  registerWebApi(ctx, forwardProxy, providers, launch)
 
   ctx.effect(() => () => {
     try { forwardProxy.close() } catch { /* already closed */ }

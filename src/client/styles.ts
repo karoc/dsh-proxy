@@ -36,6 +36,12 @@ export const PROXY_STYLES = `
 .dsh-proxy-status { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
 .dsh-proxy-status-ok { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-primary)); }
 .dsh-proxy-status-err { color: var(--dsw-alias-state-error-primary); }
+.dsh-proxy-egress { display: flex; flex-direction: column; gap: 8px; }
+.dsh-proxy-note { padding: 8px 10px; border-radius: 10px; font-size: 12px; line-height: 1.5; border: 1px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); }
+.dsh-proxy-note-ok { border-color: var(--dsw-alias-state-success-primary, var(--dsw-alias-border-l3)); color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-primary)); }
+.dsh-proxy-note-warn { border-color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-border-l3)); color: var(--dsw-alias-label-primary); }
+.dsh-proxy-snippet { padding: 8px 10px; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.6; word-break: break-all; user-select: all; }
+.dsh-proxy-port { width: 180px; }
 .dsh-proxy-heading { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; }
 .dsh-proxy-heading h4 { margin: 0; font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
 .dsh-proxy-heading .dsh-proxy-count { font-size: 11px; color: var(--dsw-alias-label-tertiary); }

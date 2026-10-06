@@ -41,6 +41,18 @@ export const en = {
   selfLoopWarning: 'The upstream points back at this proxy — treated as disabled (self-loop guard).',
   noHost: 'No proxy host set',
   teardown: 'Proxy engine stopped',
+  egressTitle: 'Egress routing (read this first)',
+  egressHint: 'dsh installs its egress policy from the environment it was LAUNCHED with, before any plugin loads — so the harness\'s own requests (model calls, web fetch) only ride this proxy when the launch environment names it.',
+  egressRouted: 'In-process traffic (model calls) IS routed through this proxy at 127.0.0.1:{port}.',
+  egressNotRouted: 'In-process traffic (model calls) is NOT routed through this proxy — it goes direct. Children (npm, git, curl) are proxied already. Add the line below to the environment dsh is started with, then restart dsh once.',
+  egressEphemeral: 'This proxy is on an ephemeral port, which a launch environment cannot name: set a fixed port below, save, restart, then point the launch environment at it.',
+  egressSnippetLabel: 'Launch environment (systemd: the [Service] section of your dsh unit)',
+  portFallback: 'Requested port {requested} was unavailable — fell back to {bound}. A launcher pointing at {requested} will not reach this proxy: free the port or change it, then restart.',
+  portRestartPending: 'Port changed to {listenPort}; restart dsh to apply (still listening on {port}).',
+  listenPortLabel: 'Fixed listen port',
+  listenPortPlaceholder: 'e.g. 45999 (0 = random)',
+  listenPortHint: 'A fixed port is what lets the launch environment point at this proxy. Saving it takes effect after a dsh restart.',
+  restartNeeded: 'Port change needs a dsh restart',
 } as const
 
 export const zh: Record<keyof typeof en, string> = {
@@ -80,6 +92,18 @@ export const zh: Record<keyof typeof en, string> = {
   selfLoopWarning: '上游指向本代理自身，视为禁用（防自环保护）。',
   noHost: '未填写代理主机',
   teardown: '代理引擎已停止',
+  egressTitle: '出网路由（先看这里）',
+  egressHint: 'dsh 在**启动时**就从启动环境安装出网策略（早于任何插件加载）——所以它自己的请求（模型调用、web fetch）只有在启动环境里指名本代理时才会经过这里。',
+  egressRouted: '进程内流量（模型调用）已走本代理：127.0.0.1:{port}。',
+  egressNotRouted: '进程内流量（模型调用）**未**走本代理——当前是直连。子进程（npm / git / curl）已经走了代理。把下面这行加进 dsh 的启动环境，然后重启一次 dsh。',
+  egressEphemeral: '本代理当前是随机端口，启动环境无法指过来：先在下面把端口固定并保存，重启后再把启动环境指向它。',
+  egressSnippetLabel: '启动环境（systemd：dsh unit 的 [Service] 段）',
+  portFallback: '请求的端口 {requested} 被占用，已回退到 {bound}。启动环境若指向 {requested}，进程内出网会失败：请释放该端口或改端口后重启。',
+  portRestartPending: '端口已改为 {listenPort}，重启 dsh 后生效（当前仍监听 {port}）。',
+  listenPortLabel: '固定监听端口',
+  listenPortPlaceholder: '如 45999（0 = 随机）',
+  listenPortHint: '把端口固定，启动环境才能指向本代理。保存后需重启 dsh 生效。',
+  restartNeeded: '端口改动需重启 dsh 生效',
 }
 
 export type ProxyKey = keyof typeof en

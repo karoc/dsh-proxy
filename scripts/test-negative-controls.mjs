@@ -136,6 +136,37 @@ const scenarios = [
       writeFileSync(p, after)
     },
   },
+  {
+    // A launcher names the fixed port; if it is taken, saying nothing sends dsh's
+    // in-process egress into a port nobody listens on.
+    name: 'a taken fixed listen port is reported as honored',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /requested listen port taken -> falls back and reports it/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace('portHonored: () => requestedPort > 0 && boundPort === requestedPort,', 'portHonored: () => true,')
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer computes portHonored')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // "In-process traffic is routed here" must not be optimistic: any other
+    // launch proxy means dsh's own requests do NOT ride this proxy.
+    name: 'any launch proxy counts as in-process routing',
+    command: 'node --test scripts/host-route.spec.mjs',
+    expect: /launch proxy pointing elsewhere is not in-process routing/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/index.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        "return (host === '127.0.0.1' || host === 'localhost' || host === '::1') && url.port === String(port)",
+        'return true',
+      )
+      if (after === before) throw new Error('mutation did not apply — src/index.ts no longer matches the launch proxy against the bound port')
+      writeFileSync(p, after)
+    },
+  },
 ]
 
 let failed = 0

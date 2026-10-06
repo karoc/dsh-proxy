@@ -60,11 +60,12 @@ dsh host 进程
 {
   "upstream": { "enabled": false, "protocol": "http", "host": "", "port": 0, "username": "", "password": "" },
   "proxiedHosts": ["api.deepseek.com"],
-  "knownHosts": ["api.deepseek.com", "registry.npmjs.org"]
+  "knownHosts": ["api.deepseek.com", "registry.npmjs.org"],
+  "listenPort": 45999
 }
 ```
 
-`knownHosts` 由插件写入（观测到的流量）；`upstream` 与 `proxiedHosts` 由设置页写入。你也可以在 dsh 运行中手改该文件——它是实时重读的。
+`knownHosts` 由插件写入（观测到的流量）；`upstream`、`proxiedHosts` 与 `listenPort` 由设置页写入（`listenPort` 重启后生效；`0` 表示随机端口）。你也可以在 dsh 运行中手改该文件——它是实时重读的。
 
 ## 安装
 
@@ -98,6 +99,26 @@ dsh plugin --profile web update @karoc/dsh-proxy
 ```
 
 然后**重启 `dsh web`** 以加载新客户端 bundle。
+
+### 让 dsh 自己的请求也走本代理（固定端口）
+
+本代理承载它所在进程的所有出站请求，但只处理**被路由过来**的那些：
+
+- **子进程**（bash、npm、pnpm、git、curl…）继承本插件写进环境的 `*PROXY` 变量，无需额外配置就走代理；
+- **dsh 自己的请求**（模型调用、web fetch/search）由 harness 的出网策略决定，而该策略是 dsh **在启动时、早于任何插件加载**从启动环境安装的——插件事后无法补上。
+
+要让模型流量走本代理，就在启动环境里指名它。这正是本代理监听**固定端口**（`proxy.json` 的 `listenPort`，默认 `45999`）而不是随机端口的原因：
+
+```ini
+# dsh web 的 systemd user unit —— [Service] 段
+Environment="HTTP_PROXY=http://127.0.0.1:45999" "HTTPS_PROXY=http://127.0.0.1:45999" \
+            "ALL_PROXY=http://127.0.0.1:45999" "NO_PROXY=127.0.0.1,localhost,::1" \
+            "NODE_USE_ENV_PROXY=1"
+```
+
+然后重启一次 dsh。**设置 → 思磨力代理**会明说当前是哪一种状态，并按你的端口打印这行配置；若固定端口被占用，代理会回退到随机端口并显式报告（`portHonored: false`）——否则启动环境会指向一个没人监听的端口，进程内出网直接失败。
+
+只想一跳？把启动环境直接指向你的上游代理也行——代价是进程内流量失去按主机分流。
 
 ### 卸载
 

@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.1.7] - 2026-10-06
+
+### Fixed
+
+- **Model requests did not go through the proxy at all — only child processes
+  did.** dsh installs its egress policy from the environment it was **launched**
+  with, before any plugin mounts (`apps/cli/src/profile-boot.ts` →
+  `@deepseek-ai/dsh-http-proxy`'s `installProxyFromEnvironment`, which owns
+  undici's global dispatcher and answers its own callers through
+  `proxyRouteFor()`). Setting `HTTP_PROXY`/`NODE_USE_ENV_PROXY` later, from a
+  plugin's `apply()`, reaches spawned children only: on a systemd-run `dsh web`
+  the harness's own `fetch` — model calls, web fetch, web search — stayed direct.
+  Measured on the affected machine in one process: a child `curl https://example.org`
+  and `npm` (registry.npmjs.org) appeared in the proxy's observed hosts, while an
+  in-process `web_fetch` (successful, HTTP 200) and dozens of model calls never
+  did. The dsh-desktop shell avoids this by setting the variables before spawning
+  `dsh` as a child; a directly-started `dsh web` has nobody to do that.
+
+  The proxy now listens on a **fixed port** (`listenPort` in `proxy.json`,
+  default `45999`) instead of an ephemeral one, so a launch environment can name
+  it: `Environment="HTTP_PROXY=http://127.0.0.1:45999" …` in the service unit,
+  then one restart, and dsh's own requests ride this proxy with per-host routing
+  intact (README → "Putting dsh's own requests behind the proxy"). An existing
+  `proxy.json` without the field adopts the default; an explicit `0` still means
+  "ephemeral".
+
+- **The page never said which traffic it was actually handling.** Settings →
+  Smoothly Proxy now reports the bound port, the configured port, whether the
+  requested port was honored, and whether dsh's own requests are routed here —
+  with the exact `Environment=` line for the current port when they are not. The
+  old header comment's "a dsh restart is the documented remedy" was **wrong**: a
+  restart alone never fixed in-process routing, because the ordering is the same
+  on every boot.
+
+- A requested fixed port that is taken now falls back to an ephemeral one **and
+  says so** (log + `portHonored: false`) instead of leaving a launcher pointed at
+  a port nothing listens on.
+
+### Added
+
+- Negative controls for both new rules: `portHonored` forced true, and the
+  launch-proxy matcher forced true, each redden `proxy-core.spec.mjs` /
+  `host-route.spec.mjs`. Guarantees G16–G17 pin them.
+
 ## [0.1.6] - 2026-10-06
 
 ### Fixed

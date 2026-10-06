@@ -20,6 +20,7 @@ import {
   createForwardProxy, readProxyConfig, shouldProxy, providerHostsFromSettings,
   providerHostsFromEntries, resolveProviderHosts,
   sanitizeUpstream, writeProxyConfig, normalizeHost, defaultProxyConfig,
+  normalizeListenPort, DEFAULT_LISTEN_PORT,
 } from '../src/proxy-core.ts'
 
 const work = mkdtempSync(join(tmpdir(), 'dsh-proxy-'))
@@ -575,9 +576,68 @@ writeCfg({
   assert.deepEqual(resolveProviderHosts({ live: undefined, legacyPath: join(work, 'nope.yaml') }), [], 'no source at all -> empty list')
 }
 
+// ── scenario 15: fixed listen port (what the launch environment names) ──────
+// Why: dsh installs its egress policy from the LAUNCH environment before any
+// plugin mounts, so the only way the harness's OWN requests (model calls) ride
+// this proxy is a port that is known before the proxy starts. A port that cannot
+// be bound must not pass silently — a launcher naming it would send dsh's
+// in-process egress into nothing.
+{
+  assert.equal(normalizeListenPort(45999), 45999, 'integer port survives')
+  assert.equal(normalizeListenPort('8080'), 8080, 'numeric string coerces')
+  assert.equal(normalizeListenPort(0), 0, 'zero means ephemeral')
+  assert.equal(normalizeListenPort(70000), 0, 'out-of-range port becomes ephemeral')
+  assert.equal(normalizeListenPort(-1), 0, 'negative port becomes ephemeral')
+  assert.equal(normalizeListenPort('nonsense'), 0, 'garbage becomes ephemeral')
+  assert.equal(defaultProxyConfig().listenPort, DEFAULT_LISTEN_PORT, 'default config pins a fixed listen port')
+
+  const cfgPath = join(work, 'listen.json')
+  assert.equal(readProxyConfig(cfgPath).listenPort, DEFAULT_LISTEN_PORT, 'missing proxy.json -> default fixed listen port')
+  writeProxyConfig(cfgPath, {}, [], 12345)
+  assert.equal(readProxyConfig(cfgPath).listenPort, 12345, 'written listen port is stored and read back')
+  writeProxyConfig(cfgPath, {}, [])
+  assert.equal(readProxyConfig(cfgPath).listenPort, 12345, 'a save that omits the port keeps the stored one')
+  writeProxyConfig(cfgPath, {}, [], 'nonsense')
+  assert.equal(readProxyConfig(cfgPath).listenPort, 0, 'garbage port normalizes to ephemeral')
+  writeFileSync(cfgPath, JSON.stringify({ listenPort: 99999 }))
+  assert.equal(readProxyConfig(cfgPath).listenPort, 0, 'out-of-range STORED port normalizes to ephemeral')
+
+  // A free fixed port is bound as requested, and reported as honored.
+  const freeProbe = netCreateServer()
+  await new Promise((r) => freeProbe.listen(0, '127.0.0.1', r))
+  const fixed = freeProbe.address().port
+  await new Promise((r) => freeProbe.close(r))
+  const fixedProxy = createForwardProxy({ configFile: join(work, 'fixed.json'), listenPort: fixed })
+  const boundPort = await fixedProxy.port
+  assert.equal(boundPort, fixed, 'the requested fixed port is the one bound')
+  assert.equal(fixedProxy.requestedPort, fixed, 'handle reports the requested port')
+  assert.equal(fixedProxy.portHonored(), true, 'a free fixed port is honored')
+  fixedProxy.close()
+
+  // A taken port falls back to an ephemeral one AND says so.
+  const blocker = netCreateServer()
+  await new Promise((r) => blocker.listen(0, '127.0.0.1', r))
+  const taken = blocker.address().port
+  const fallbackLogs = []
+  const fallbackProxy = createForwardProxy({
+    configFile: join(work, 'taken.json'),
+    listenPort: taken,
+    log: (line) => fallbackLogs.push(line),
+  })
+  const fallbackPort = await fallbackProxy.port
+  assert.ok(fallbackPort > 0 && fallbackPort !== taken, 'a taken fixed port still leaves a working listener')
+  assert.equal(fallbackProxy.portHonored(), false, 'requested listen port taken -> falls back and reports it')
+  assert.ok(
+    fallbackLogs.some((line) => line.includes(String(taken))),
+    'the fallback names the port it could not bind',
+  )
+  fallbackProxy.close()
+  blocker.close()
+}
+
 proxy.close()
 up.srv.close()
 o1.srv.close()
 rmSync(work, { recursive: true, force: true })
-console.log('PASS — proxy-core (14 scenarios)')
+console.log('PASS — proxy-core (15 scenarios)')
 process.exit(0)

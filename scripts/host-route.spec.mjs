@@ -12,6 +12,7 @@
 //   - the loopback proxy actually forwards a request (route through it)
 import { createServer } from 'node:http'
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { createServer as netCreateServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
@@ -23,7 +24,19 @@ const home = join(work, 'home')
 const configFile = join(home, 'proxy.json')
 process.env.DSH_HOME = home
 
-const { apply, proxyConfigPath, settingsPath } = await import('../src/index.ts')
+// A FIXED listen port named by the LAUNCH environment is the one mechanism
+// that puts dsh's own in-process requests (model calls) behind this proxy: the
+// harness installs its egress policy from that environment before plugins mount,
+// so no plugin can do it afterwards. Pin the whole path end to end below.
+const launchProbe = netCreateServer()
+await new Promise((r) => launchProbe.listen(0, '127.0.0.1', r))
+const launchPort = launchProbe.address().port
+await new Promise((r) => launchProbe.close(r))
+mkdirSync(home, { recursive: true })
+writeFileSync(configFile, JSON.stringify({ listenPort: launchPort }) + '\n')
+process.env.HTTP_PROXY = `http://user:secret@127.0.0.1:${launchPort}`
+
+const { apply, proxyConfigPath, settingsPath, launchProxyTargetsPort, maskProxyUrl } = await import('../src/index.ts')
 
 // A fake webServer: capture the registered handler and serve it on a real
 // node:http server so the test can hit it over HTTP.
@@ -110,6 +123,29 @@ async function run() {
     assert.equal(body.upstream.enabled, false, 'default upstream disabled')
     assert.deepEqual(body.proxiedHosts, [], 'default no proxied hosts')
     assert.ok(Array.isArray(body.providers), 'providers is a list')
+    // The launch environment named this port, so dsh's own requests ride here.
+    assert.equal(body.listenPort, launchPort, 'view reports the configured fixed port')
+    assert.equal(body.port, launchPort, 'the proxy bound the port the launch environment names')
+    assert.equal(body.portRequested, launchPort, 'view reports the port the listener was asked for')
+    assert.equal(body.portHonored, true, 'a free fixed port is honored at runtime')
+    assert.equal(body.inProcessRouted, true, 'launch environment naming this port -> in-process traffic is routed here')
+    assert.ok(String(body.launchProxy).includes('127.0.0.1'), 'the launch proxy is reported')
+    assert.ok(!String(body.launchProxy).includes('secret'), 'launch proxy credentials never leave the process')
+
+    // The flag must not be optimistic: anything else means dsh's own requests
+    // do NOT ride this proxy.
+    assert.equal(
+      launchProxyTargetsPort({ name: 'HTTP_PROXY', value: `http://127.0.0.1:${launchPort + 1}` }, launchPort),
+      false,
+      'launch proxy pointing elsewhere is not in-process routing',
+    )
+    assert.equal(
+      launchProxyTargetsPort({ name: 'HTTP_PROXY', value: `http://proxy.example:${launchPort}` }, launchPort),
+      false,
+      'a non-loopback launch proxy is not in-process routing',
+    )
+    assert.equal(launchProxyTargetsPort(null, launchPort), false, 'no launch proxy -> not in-process routing')
+    assert.ok(!maskProxyUrl('http://u:p@127.0.0.1:1').includes('u:p'), 'maskProxyUrl strips credentials')
     assert.ok(Array.isArray(body.hosts), 'hosts is a list')
     assert.ok(Array.isArray(body.knownHosts), 'knownHosts is a list')
   }
