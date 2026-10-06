@@ -129,7 +129,7 @@ const scenarios = [
       const p = join(dir, 'src/proxy-core.ts')
       const before = readFileSync(p, 'utf8')
       const after = before.replace(
-        'if (host && !LOOPBACK.test(host.toLowerCase())) out.push(',
+        'if (host && !isLoopbackHost(host)) out.push(',
         'if (host) out.push(',
       )
       if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer filters loopback provider hosts')
@@ -249,6 +249,59 @@ const scenarios = [
         "  return (value ?? 'only-listed') as RouteMode",
       )
       if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer fails safe on an unknown rule')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // The bracketed spelling a URL parser hands us must count as loopback, or a
+    // `[::1]` target can be sent to the upstream proxy.
+    name: 'a bracketed IPv6 loopback stops being loopback',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    // The mutation is caught by the first assertion it reaches: the provider list
+    // must not offer a bracketed loopback endpoint.
+    expect: /IPv6 loopback endpoints are never offered/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        "  const bare = String(host ?? '').trim().toLowerCase().replace(/^\\[|\\]$/g, '')",
+        "  const bare = String(host ?? '').trim().toLowerCase()",
+      )
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer unwraps bracketed literals')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // The same target arrives as `[v6]` from a provider baseURL and as `v6` from
+    // a CONNECT authority: exact-string matching silently drops one of them.
+    name: 'listed hosts are matched by exact string again',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /a listed remote IPv6 target goes upstream/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        '  const listed = (cfg?.proxiedHosts ?? []).some((entry) => normalizeHostForMatch(entry) === wanted)',
+        '  const listed = (cfg?.proxiedHosts ?? []).includes(h)',
+      )
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer normalizes host matching')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // Parsing a CONNECT authority by splitting on ':' turns `[::1]:443` into
+    // host `[`, which both defeats the loopback guard and pollutes the list.
+    name: 'CONNECT authority is split on colons again',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /a bracketed CONNECT authority does not land in the observed hosts/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        "    const target = parseConnectAuthority(String(req.url ?? ''))",
+        "    const [h0, p0] = String(req.url ?? '').split(':'); const target = { host: (h0 ?? '').toLowerCase(), port: Number(p0) || 443 }",
+      )
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer parses the CONNECT authority')
       writeFileSync(p, after)
     },
   },

@@ -20,7 +20,8 @@ import {
   createForwardProxy, readProxyConfig, shouldProxy, providerHostsFromSettings,
   providerHostsFromEntries, resolveProviderHosts,
   sanitizeUpstream, writeProxyConfig, normalizeHost, defaultProxyConfig,
-  normalizeListenPort, normalizeRouteMode,
+  normalizeListenPort, normalizeRouteMode, isLoopbackHost, normalizeHostForMatch,
+  parseConnectAuthority, formatAuthority,
 } from '../src/proxy-core.ts'
 
 const work = mkdtempSync(join(tmpdir(), 'dsh-proxy-'))
@@ -547,6 +548,29 @@ writeCfg({
     [],
     'malformed provider values are skipped, not fatal',
   )
+  // The DeepSeek route resolves its endpoint from a runtime constant, so the
+  // document carries no host: without a fallback the provider that carries real
+  // traffic never appears.
+  assert.deepEqual(
+    providerHostsFromEntries({ namespaces: [{ ns: 'llm-deepseek', value: { models: [{ id: 'deepseek-flash' }] } }] }),
+    [{ name: 'llm-deepseek', displayName: 'DeepSeek', host: 'api.deepseek.com' }],
+    'llm-deepseek without a configured baseURL keeps its public endpoint in the list',
+  )
+  assert.deepEqual(
+    providerHostsFromEntries({ namespaces: [{ ns: 'llm-deepseek', value: { baseURL: 'https://my-gateway.example/v1' } }] }),
+    [{ name: 'llm-deepseek', displayName: 'DeepSeek', host: 'my-gateway.example' }],
+    'a configured baseURL wins over the public endpoint',
+  )
+  // IPv6 endpoints are loopback too, in every spelling.
+  assert.deepEqual(
+    providerHostsFromEntries({ namespaces: [{ ns: 'llm-pi-ai', value: { providers: {
+      six: { baseURL: 'http://[::1]:11434/v1' },
+      mapped: { baseURL: 'http://[::ffff:127.0.0.1]:11434/v1' },
+      remote: { baseURL: 'http://[2001:db8::1]:8080/v1' },
+    } } }] }),
+    [{ name: 'llm-pi-ai/remote', host: '[2001:db8::1]' }],
+    'IPv6 loopback endpoints are never offered, bracketed or IPv4-mapped',
+  )
   assert.deepEqual(
     providerHostsFromEntries(liveNamespaces),
     expected,
@@ -611,6 +635,67 @@ writeCfg({
   assert.equal(readProxyConfig(rulePath).routeMode, 'except-listed', 'a save that omits the rule keeps it')
   writeProxyConfig(rulePath, { routeMode: 'nonsense' })
   assert.equal(readProxyConfig(rulePath).routeMode, 'only-listed', 'a garbage rule is stored as the safe default')
+}
+
+// ── scenario 14b: IPv6 spellings of loopback ────────────────────────────────
+// Why: `new URL('http://[::1]:1/').hostname` is `[::1]`, Node rewrites an
+// IPv4-mapped literal to `::ffff:7f00:1`, and a CONNECT authority is
+// `[::1]:443`. Only the bare `::1` used to count, so a bracketed loopback target
+// could be handed to the upstream proxy — against the guarantee that loopback is
+// always direct — and `split(':')` made the observed-host list collect `[`.
+{
+  assert.equal(normalizeHostForMatch('[::1]'), '::1', 'a bracketed IPv6 literal unwraps')
+  assert.equal(normalizeHostForMatch('[::ffff:127.0.0.1]'), '127.0.0.1', 'an IPv4-mapped literal becomes its IPv4 form')
+  assert.equal(normalizeHostForMatch('::ffff:7f00:1'), '127.0.0.1', "Node's normalized mapped form is recognised too")
+  assert.equal(normalizeHostForMatch(' Example.ORG '), 'example.org', 'ordinary hosts are just trimmed and lowercased')
+  for (const spelling of ['127.0.0.1', '127.0.0.2', 'localhost', '::1', '[::1]', '::ffff:127.0.0.1', '[::ffff:127.0.0.1]', '0.0.0.0']) {
+    assert.equal(isLoopbackHost(spelling), true, `every loopback spelling is loopback: ${spelling}`)
+  }
+  for (const spelling of ['example.org', '[2001:db8::1]', '10.0.0.1', '127.0.0.1.evil.example']) {
+    assert.equal(isLoopbackHost(spelling), false, `not loopback: ${spelling}`)
+  }
+  assert.deepEqual(parseConnectAuthority('[::1]:443'), { host: '::1', port: 443 }, 'a bracketed CONNECT authority keeps its address intact')
+  assert.deepEqual(parseConnectAuthority('example.org:8443'), { host: 'example.org', port: 8443 }, 'a plain CONNECT authority parses')
+  assert.deepEqual(parseConnectAuthority('[2001:db8::1]:9443'), { host: '2001:db8::1', port: 9443 }, 'a remote IPv6 authority parses')
+  assert.equal(parseConnectAuthority('[::1]').port, 443, 'a missing port defaults to 443')
+  assert.equal(parseConnectAuthority('nonsense'), null, 'an unparseable authority is rejected')
+  assert.equal(formatAuthority('2001:db8::1', 443), '[2001:db8::1]:443', 'IPv6 is bracketed on the wire')
+  assert.equal(formatAuthority('example.org', 443), 'example.org:443', 'ordinary hosts are not bracketed')
+
+  // Routing: no spelling of loopback ever goes upstream, even when listed.
+  const cfg = {
+    ...defaultProxyConfig(),
+    upstream: { enabled: true, protocol: 'http', host: 'up.example', port: 8080, username: '', password: '' },
+    proxiedHosts: ['127.0.0.1', '127.0.0.2', 'localhost', '::1', '[::1]', '::ffff:127.0.0.1', '[2001:db8::1]'],
+  }
+  for (const spelling of ['127.0.0.1', '127.0.0.2', 'localhost', '::1', '[::1]', '::ffff:127.0.0.1']) {
+    assert.equal(shouldProxy(cfg, spelling), false, `loopback stays direct even when listed: ${spelling}`)
+  }
+  assert.equal(shouldProxy(cfg, '[2001:db8::1]'), true, 'a listed REMOTE IPv6 target is proxied')
+  assert.equal(shouldProxy({ ...cfg, upstream: { ...cfg.upstream, host: '[::1]', port: 9999 } }, 'example.org', 9999), false, 'a bracketed loopback upstream is recognised as the self-loop')
+
+  // End to end against the real listener: a bracketed loopback CONNECT must go
+  // direct (and must not pollute the observed-host list with `[`), while a listed
+  // remote IPv6 target goes upstream and keeps its bracketed wire form.
+  {
+    writeCfg({
+      upstream: { enabled: true, protocol: 'http', host: '127.0.0.1', port: up.port(), username: '', password: '' },
+      proxiedHosts: ['[::1]', '::1', '127.0.0.1', '[2001:db8::1]'],
+      knownHosts: [],
+    })
+    const beforeUpstream = up.seen.length
+    const loopbackAttempt = await rawConnect(proxyPort, '[::1]:9')
+    loopbackAttempt.sock.destroy()
+    assert.equal(up.seen.length, beforeUpstream, 'a bracketed loopback CONNECT never reaches the upstream')
+    assert.ok(!proxy.hosts().includes('['), 'a bracketed CONNECT authority does not land in the observed hosts')
+
+    const beforeRemote = up.seen.length
+    const remoteAttempt = await rawConnect(proxyPort, '[2001:db8::1]:443')
+    remoteAttempt.sock.destroy()
+    const remoteHit = up.seen.slice(beforeRemote).find((entry) => entry.kind === 'connect')
+    assert.ok(remoteHit !== undefined, 'a listed remote IPv6 target goes upstream')
+    assert.equal(remoteHit.target, '[2001:db8::1]:443', 'the upstream CONNECT line keeps the IPv6 address bracketed')
+  }
 }
 
 // ── scenario 15: fixed listen port (what the launch environment names) ──────

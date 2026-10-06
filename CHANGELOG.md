@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.1.14] - 2026-10-06
+
+### Fixed
+
+- **IPv6 loopback is loopback in every spelling it arrives in.** The guard only
+  matched the bare `::1`, while a URL parser hands over `[::1]`, Node rewrites an
+  IPv4-mapped literal to `::ffff:7f00:1`, and a CONNECT authority is
+  `[::1]:443` — so a bracketed loopback target could be sent to the upstream
+  proxy, against the guarantee that loopback is always direct. One shared
+  classifier now normalizes all of them (brackets, dotted and hex IPv4-mapped
+  forms) and is used by routing, the self-loop guard, the observed-host list and
+  the provider list.
+
+- **CONNECT authorities are parsed, not split on `:`.** `[::1]:443` used to
+  become host `[`, which both defeated the loopback test and wrote a junk `[`
+  entry into the observed-host list a user could then tick. The upstream CONNECT
+  line keeps IPv6 addresses bracketed, and `proxiedHosts` matching is normalized
+  so a listed `[2001:db8::1]` also matches the `2001:db8::1` form a CONNECT
+  produces.
+
+- **`llm-deepseek` no longer vanishes from the provider list.** Without a
+  configured `baseURL` the document carries no host — the harness resolves that
+  endpoint from a runtime constant — so the provider carrying real traffic was
+  absent. It now falls back to the public endpoint (`api.deepseek.com`); a
+  configured `baseURL` still wins.
+
+### Added
+
+- README: a deployment matrix (terminal/unit, dsh-desktop, launcher-declared
+  proxy, headless, unusual builds) stating what routes dsh's own requests and
+  what the page shows for each.
+
+### Verified
+
+- **npm-installed layout, for real**: `npm install @deepseek-ai/dsh@0.2.1-alpha.1`
+  in a scratch tree, then the plugin's own resolver anchored at the installed
+  entry (`node_modules/@deepseek-ai/dsh/lib/bin.js`) — it resolves
+  `installProxyFromEnvironment` from the installed `dsh-http-proxy`, and a real
+  in-process `fetch` issued a `CONNECT example.org:443` through the installed
+  policy. The earlier "[assumed]" note about this layout is settled.
+- **dsh-desktop carries the same empty-provider defect** (its `proxy.mjs` reads
+  the removed `settings.yaml`). Fixed in that repository: a profile-document
+  reader (`profiles/<name>/cordis.patch.yml`), loopback filtering, and the same
+  DeepSeek public-endpoint rule; its `test-proxy` (12 scenarios, incl. a new
+  profile-document case) and `test-copy-consistency` gates pass.
+
 ## [0.1.13] - 2026-10-06
 
 ### Added

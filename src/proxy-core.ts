@@ -37,6 +37,54 @@ import { dirname } from 'node:path'
 
 const LOOPBACK = /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost|::1|0\.0\.0\.0)$/i
 
+/**
+ * Normalize a host as it arrives from different places so ONE loopback test
+ * covers all of them: `new URL('http://[::1]:1/').hostname` is `[::1]` (brackets
+ * included), Node normalizes an IPv4-mapped literal to `::ffff:7f00:1`, and a
+ * CONNECT authority is `[::1]:443`. Historically only the bare `::1` counted, so
+ * a bracketed or mapped loopback target could be sent to the upstream proxy —
+ * contradicting the guaranteed "loopback is always direct".
+ */
+export function normalizeHostForMatch(host: string): string {
+  const bare = String(host ?? '').trim().toLowerCase().replace(/^\[|\]$/g, '')
+  // Dotted spelling, as written by hand or by an IPv4-mapped literal.
+  const dotted = bare.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
+  if (dotted !== null) return dotted[1]
+  // Hex spelling, which is what Node's URL parser produces.
+  const mapped = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+  if (mapped === null) return bare
+  const hi = Number.parseInt(mapped[1], 16)
+  const lo = Number.parseInt(mapped[2], 16)
+  return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join('.')
+}
+
+/** Whether `host` is a loopback/unspecified target in any of its spellings. */
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK.test(normalizeHostForMatch(host))
+}
+
+/**
+ * Split a CONNECT authority into the routing host and port. `[v6]:port` keeps
+ * its brackets around the ADDRESS only — `split(':')` turned the whole thing
+ * into host `[`, which both polluted the observed-host list and defeated the
+ * loopback test.
+ */
+export function parseConnectAuthority(authority: string): { host: string; port: number } | null {
+  const value = String(authority ?? '')
+  const match = value.match(/^\[([^\]]+)\](?::(\d+))?$/) ?? value.match(/^([^:]+):(\d+)$/)
+  if (match === null) return null
+  const host = match[1].trim().toLowerCase()
+  if (host === '') return null
+  const port = Number(match[2])
+  return { host, port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : 443 }
+}
+
+/** Format a host:port for an HTTP request line / Host header (brackets for IPv6). */
+export function formatAuthority(host: string, port: number): string {
+  const bare = String(host ?? '').trim()
+  return bare.includes(':') ? `[${bare}]:${port}` : `${bare}:${port}`
+}
+
 /** Upstream proxy protocol, defaulting to http (legacy configs have no field). */
 export function upstreamProtocol(cfg: ProxyConfig): string {
   return String(cfg?.upstream?.protocol || 'http').toLowerCase()
@@ -158,7 +206,7 @@ function openUpstreamTunnel(cfg: ProxyConfig, targetHost: string, targetPort: nu
           await socks5Handshake(socket, u, targetHost, targetPort)
           resolvePromise({ socket, rest: Buffer.alloc(0) })
         } else {
-          const lines = [`CONNECT ${targetHost}:${targetPort} HTTP/1.1`, `Host: ${targetHost}:${targetPort}`]
+          const lines = [`CONNECT ${formatAuthority(targetHost, targetPort)} HTTP/1.1`, `Host: ${formatAuthority(targetHost, targetPort)}`]
           if (authHeader) lines.push(`Proxy-Authorization: ${authHeader}`)
           socket.write(lines.join('\r\n') + '\r\n\r\n')
           const { head, rest } = await readUntil(socket, '\r\n\r\n')
@@ -208,6 +256,15 @@ export interface ProviderHost {
   displayName?: string
 }
 
+/**
+ * The endpoint the harness itself uses when `llm-deepseek` configures no
+ * `baseURL`: its schema has no default for that field, so the live config carries
+ * no host to read and the DeepSeek route would be missing from the list even
+ * though it carries real traffic. Keep in sync with the plugin's public constant
+ * (`PUBLIC_BASE_URL` = https://api.deepseek.com/anthropic).
+ */
+const DEEPSEEK_PUBLIC_BASE_URL = 'https://api.deepseek.com/anthropic'
+
 /** Friendly name for a namespace whose providers carry no `displayName`. */
 function defaultDisplayName(ns: string): string | null {
   return ns === 'llm-deepseek' ? 'DeepSeek' : null
@@ -234,7 +291,7 @@ function pushProviderHosts(
     for (const candidate of String(baseUrl).split(',').map((s) => s.trim()).filter(Boolean)) {
       try {
         const host = new URL(candidate).hostname
-        if (host && !LOOPBACK.test(host.toLowerCase())) out.push({ name, ...(displayName ? { displayName } : {}), host })
+        if (host && !isLoopbackHost(host)) out.push({ name, ...(displayName ? { displayName } : {}), host })
       } catch { /* malformed candidate — skip */ }
     }
   }
@@ -270,6 +327,7 @@ export function providerHostsFromEntries(entries: unknown): ProviderHost[] {
     if (!ns.startsWith('llm-')) continue
     const value = entry['value']
     if (!isRecord(value)) continue
+    const before = out.length
     if (isRecord(value['providers'])) {
       for (const [provider, block] of Object.entries(value['providers'])) {
         if (!isRecord(block)) continue
@@ -281,10 +339,14 @@ export function providerHostsFromEntries(entries: unknown): ProviderHost[] {
           baseUrls: typeof block['baseURL'] === 'string' ? [block['baseURL']] : [],
         })
       }
-      continue
-    }
-    if (typeof value['baseURL'] === 'string') {
+    } else if (typeof value['baseURL'] === 'string') {
       pushProviderHosts(out, { ns, provider: null, displayName: null, baseUrls: [value['baseURL']] })
+    }
+    // A namespace that yielded no host but has a known public endpoint: the
+    // DeepSeek route resolves its endpoint from a runtime constant, never from
+    // the document, so without this it is invisible even while in use.
+    if (ns === 'llm-deepseek' && out.length === before) {
+      pushProviderHosts(out, { ns, provider: null, displayName: 'DeepSeek', baseUrls: [DEEPSEEK_PUBLIC_BASE_URL] })
     }
   }
   return out
@@ -388,11 +450,16 @@ export function providerHostsFromSettings(settingsPath: string): ProviderHost[] 
  */
 export function shouldProxy(cfg: ProxyConfig, host: string, selfPort?: number): boolean {
   const h = String(host ?? '').toLowerCase()
-  if (LOOPBACK.test(h)) return false
+  if (isLoopbackHost(h)) return false
   const u = cfg?.upstream
-  const selfRef = u?.host && LOOPBACK.test(u.host.toLowerCase()) && Number(u.port) === selfPort
+  const selfRef = u?.host && isLoopbackHost(u.host) && Number(u.port) === selfPort
   if (!Boolean(u?.enabled) || selfRef) return false
-  const listed = (cfg?.proxiedHosts ?? []).includes(h)
+  // Match on the NORMALIZED form: the same target reaches this list as `[::1]`
+  // from a provider baseURL and as `::1` from a CONNECT authority, and a listed
+  // IPv6 host must not silently read as "not listed" (which would send it direct
+  // in only-listed mode, or upstream in except-listed mode).
+  const wanted = normalizeHostForMatch(h)
+  const listed = (cfg?.proxiedHosts ?? []).some((entry) => normalizeHostForMatch(entry) === wanted)
   return normalizeRouteMode(cfg?.routeMode) === 'except-listed' ? !listed : listed
 }
 
@@ -424,7 +491,7 @@ export function createForwardProxy(opts: {
 
   const markHost = (host: string) => {
     const h = String(host ?? '').trim().toLowerCase()
-    if (!h || LOOPBACK.test(h)) return
+    if (!h || isLoopbackHost(h)) return
     if (seenHosts.has(h)) return
     seenHosts.add(h)
     if (notifyTimer) clearTimeout(notifyTimer)
@@ -523,14 +590,15 @@ export function createForwardProxy(opts: {
   })
 
   server.on('connect', (req, clientSocket, head) => {
-    // CONNECT host:port — the HTTPS tunnel every model request rides.
-    const [hostRaw, portRaw] = String(req.url ?? '').split(':')
-    const host = (hostRaw ?? '').toLowerCase()
-    const port = Number(portRaw) || 443
-    if (!host || !port) {
+    // CONNECT host:port — the HTTPS tunnel every model request rides. IPv6
+    // literals arrive bracketed (`[::1]:443`), so the authority is parsed, not
+    // split on ':'.
+    const target = parseConnectAuthority(String(req.url ?? ''))
+    if (target === null) {
       clientSocket.destroy()
       return
     }
+    const { host, port } = target
     markHost(host)
     const { via, cfg } = routeFor(host, (server.address() as { port: number } | null)?.port)
 

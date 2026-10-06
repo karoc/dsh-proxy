@@ -173,6 +173,16 @@ Settings → Smoothly Proxy states which of the following is true:
   composition (unusual layouts). The page then prints the exact `Environment=`
   line to declare instead, and everything else keeps working.
 
+### Which deployment does what
+
+| How dsh was started | What routes dsh's own requests | Page shows |
+|---|---|---|
+| `dsh web` from a terminal or a unit you own | this plugin (it installs the policy itself) | *routing through this plugin* |
+| dsh-desktop shell | the shell's proxy — it sets `*PROXY` before spawning dsh | *the launch environment declares a different proxy* (by design: layering ours over it would bypass the shell's policy) |
+| a launcher that sets `HTTP_PROXY=http://127.0.0.1:<port>` itself | dsh, before any plugin loads | *routing through this plugin (named by the launch environment)* |
+| a headless profile | nothing — this plugin is not loaded without the web server | — |
+| a build that does not expose `@deepseek-ai/dsh-http-proxy` | nothing; the plugin cannot join | *could not take over automatically* + the line to paste |
+
 ### Removing
 
 ```sh

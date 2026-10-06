@@ -32,3 +32,5 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G20 | 未固定端口时**采纳启动环境声明的 loopback 端口**（那是启动方期望本代理所在的地址）；非 loopback 或非法值绝不采纳 | `adoption recognises the loopback spellings` |
 | G21 | 「除勾选外全部走上游」模式下语义**显式反转**：未勾选主机走上游、勾选主机直连；上游禁用或 loopback 目标仍然不代理 | `except-listed: an unchecked host goes upstream` |
 | G22 | 无法识别的 `routeMode` 一律收敛为**默认（只代理勾选）**，绝不因为坏值变成"全部走上游" | `an unknown route mode falls back to only-listed, never to all-upstream` |
+| G23 | IPv6 字面量在**任何拼写**下都按 loopback 归类（`::1` / `[::1]` / `::ffff:127.0.0.1`，含 Node 归一化后的 `::ffff:7f00:1`）；且 `proxiedHosts` 匹配走归一化形态——列了 `[::1]` 也拦得住 `::1` 目标 | `every loopback spelling is loopback:` |
+| G24 | CONNECT 的 `[v6]:port` 只把方括号当 authority 语法：`[::1]` 目标恒直连**且不留下 `[` 这种垃圾主机名**，远端 IPv6 目标走上游时保留方括号形式 | `a bracketed loopback CONNECT never reaches the upstream` |
