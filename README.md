@@ -99,7 +99,10 @@ Safety rules (hard-coded, not configurable):
 
 `knownHosts` is written by the plugin (observed traffic); `upstream`,
 `proxiedHosts` and `listenPort` are written from the settings page
-(`listenPort` takes effect after a restart; `0` means an ephemeral port). You can also hand-edit the
+(`listenPort` takes effect after a restart; `0` means an ephemeral port).
+`listenPort` is the address this plugin LISTENS on — it is not the upstream
+address, which belongs in `upstream`; setting it to the upstream's own port
+fails to bind and falls back to an ephemeral port. You can also hand-edit the
 file while dsh runs — it is re-read live.
 
 ## Install

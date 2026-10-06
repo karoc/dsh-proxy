@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.12] - 2026-10-06
+
+### Changed
+
+- **The listen-port field now says what it is not.** A user reading the panel
+  reasonably asked whether the upstream's port belongs there (their upstream is
+  on loopback, so the two ports look interchangeable). It is the address this
+  plugin LISTENS on, not a destination: the label now reads "plugin listen port
+  (optional — NOT the upstream address)", the hint points at the upstream card,
+  and typing the configured upstream's own loopback port produces a specific
+  warning instead of leaving the bind failure as the only feedback. The same
+  clarification is in the README's `proxy.json` section.
+
+  What actually happens if you do it anyway: the bind fails (the upstream owns
+  that port), the plugin falls back to an ephemeral port and reports it, and —
+  because the upstream card is off in that scenario — every host goes DIRECT, so
+  the local upstream is bypassed entirely.
+
 ## [0.1.11] - 2026-10-06
 
 ### Changed

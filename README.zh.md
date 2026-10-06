@@ -65,7 +65,7 @@ dsh host 进程
 }
 ```
 
-`knownHosts` 由插件写入（观测到的流量）；`upstream`、`proxiedHosts` 与 `listenPort` 由设置页写入（`listenPort` 重启后生效；`0` 表示随机端口）。你也可以在 dsh 运行中手改该文件——它是实时重读的。
+`knownHosts` 由插件写入（观测到的流量）；`upstream`、`proxiedHosts` 与 `listenPort` 由设置页写入（`listenPort` 重启后生效；`0` 表示随机端口）。`listenPort` 是本插件**监听**的地址，**不是上游地址**——上游地址属于 `upstream`；把它填成上游自己的端口会导致绑定失败并回退到临时端口。你也可以在 dsh 运行中手改该文件——它是实时重读的。
 
 ## 安装
 

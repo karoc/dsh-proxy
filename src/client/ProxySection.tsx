@@ -350,8 +350,17 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
   const launchPort = (view?.listenPort ?? 0) > 0 ? view!.listenPort : view?.port ?? 0
   // Opened automatically only when the normal (self-installed, auto-port) state
   // is not what is happening — otherwise this stays a collapsed diagnostic.
+  // The one mix-up this panel can invite: the upstream's own port typed into
+  // the listen-port field. Detect it and say what it means instead of letting
+  // the bind failure be the only feedback.
+  const upstreamIsLoopback = /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost|::1)$/i.test((view?.upstream.host ?? '').trim())
+  const portConflictsUpstream = view !== undefined
+    && view.listenPort > 0
+    && upstreamIsLoopback
+    && view.upstream.port === view.listenPort
   const diagnosticsNeedAttention = view !== undefined && (
-    view.egressStatus === undefined
+    portConflictsUpstream
+    || view.egressStatus === undefined
     || view.egressStatus !== 'self-installed'
     || (!view.portHonored && view.portRequested > 0)
     || (view.listenPort > 0 && view.listenPort !== view.portRequested)
@@ -432,6 +441,12 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
               {!view.portHonored && view.portRequested > 0 && (
                 <div className="dsh-proxy-note dsh-proxy-note-warn">
                   {t('portFallback').replace('{requested}', String(view.portRequested)).replace('{bound}', String(view.port ?? '?'))}
+                </div>
+              )}
+              {portConflictsUpstream && (
+                <div className="dsh-proxy-note dsh-proxy-note-warn">
+                  {t('portConflictsUpstream')
+                    .replace(/\{port\}/g, String(view?.listenPort ?? ''))}
                 </div>
               )}
               {view.listenPort > 0 && view.listenPort !== view.portRequested && (
