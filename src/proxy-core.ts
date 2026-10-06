@@ -29,7 +29,7 @@
  */
 
 import { createServer, request as httpRequest } from 'node:http'
-import { connect as tcpConnect, type Socket } from 'node:net'
+import { connect as tcpConnect, isIPv6, type Socket } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
 import type { Duplex } from 'node:stream'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -88,6 +88,54 @@ export function formatAuthority(host: string, port: number): string {
 /** Upstream proxy protocol, defaulting to http (legacy configs have no field). */
 export function upstreamProtocol(cfg: ProxyConfig): string {
   return String(cfg?.upstream?.protocol || 'http').toLowerCase()
+}
+
+/**
+ * Expand an IPv6 literal into its 16 wire bytes (SOCKS5 ATYP=4). Handles `::`
+ * compression, an embedded IPv4 tail (`::ffff:1.2.3.4`) and a zone id
+ * (`fe80::1%eth0` — a zone has no wire representation and is dropped).
+ * Returns null when the text is not a valid IPv6 address.
+ */
+export function ipv6ToBytes(address: string): Buffer | null {
+  let text = String(address ?? '').trim().toLowerCase()
+  const zone = text.indexOf('%')
+  if (zone >= 0) text = text.slice(0, zone)
+  if (text === '') return null
+  const halves = text.split('::')
+  if (halves.length > 2) return null
+  const parseGroups = (part: string): number[] | null => {
+    if (part === '') return []
+    const groups: number[] = []
+    for (const group of part.split(':')) {
+      if (group.includes('.')) {
+        const octets = group.split('.')
+        if (octets.length !== 4) return null
+        for (const octet of octets) {
+          if (!/^\d{1,3}$/.test(octet) || Number(octet) > 255) return null
+        }
+        const [a, b, c, d] = octets.map(Number)
+        groups.push((a << 8) | b, (c << 8) | d)
+        continue
+      }
+      if (!/^[0-9a-f]{1,4}$/.test(group)) return null
+      groups.push(Number.parseInt(group, 16))
+    }
+    return groups
+  }
+  const head = parseGroups(halves[0])
+  if (head === null) return null
+  let groups: number[]
+  if (halves.length === 2) {
+    const tail = parseGroups(halves[1])
+    if (tail === null) return null
+    const missing = 8 - head.length - tail.length
+    if (missing < 1) return null
+    groups = [...head, ...new Array<number>(missing).fill(0), ...tail]
+  } else {
+    if (head.length !== 8) return null
+    groups = head
+  }
+  return Buffer.from(groups.flatMap((group) => [(group >> 8) & 0xff, group & 0xff]))
 }
 
 /** Read exactly n bytes from a socket (SOCKS5 fixed-size frames). */
@@ -160,6 +208,12 @@ async function socks5Handshake(socket: Socket, upstream: UpstreamConfig, targetH
   let addrPart
   if (isIpv4) {
     addrPart = Buffer.concat([Buffer.from([0x01]), ...targetHost.split('.').map((o) => Buffer.from([Number(o) & 0xff]))])
+  } else if (isIPv6(targetHost)) {
+    // ATYP=4 carries the 16 address bytes. Sending an IPv6 literal as a DOMAIN
+    // (the old behaviour) makes the upstream resolve a name that cannot exist.
+    const bytes = ipv6ToBytes(targetHost)
+    if (bytes === null) throw new Error(`socks5: cannot encode IPv6 target ${targetHost}`)
+    addrPart = Buffer.concat([Buffer.from([0x04]), bytes])
   } else {
     const name = Buffer.from(targetHost, 'ascii')
     addrPart = Buffer.concat([Buffer.from([0x03, name.length]), name])

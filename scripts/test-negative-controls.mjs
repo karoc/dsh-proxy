@@ -293,7 +293,10 @@ const scenarios = [
     // host `[`, which both defeats the loopback guard and pollutes the list.
     name: 'CONNECT authority is split on colons again',
     command: 'node --test scripts/proxy-core.spec.mjs',
-    expect: /a bracketed CONNECT authority does not land in the observed hosts/,
+    // The split is caught first by the SOCKS5 IPv6-target case (the address is
+    // mangled into `[2001` long before the observed-host assertion runs); that it
+    // also pollutes the host list is asserted later in the same spec.
+    expect: /socks5: IPv6 target is sent as ATYP=4 with 16 address bytes/,
     mutate: (dir) => {
       const p = join(dir, 'src/proxy-core.ts')
       const before = readFileSync(p, 'utf8')
@@ -302,6 +305,20 @@ const scenarios = [
         "    const [h0, p0] = String(req.url ?? '').split(':'); const target = { host: (h0 ?? '').toLowerCase(), port: Number(p0) || 443 }",
       )
       if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer parses the CONNECT authority')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // An IPv6 target sent to a SOCKS5 upstream as a DOMAIN is a name no resolver
+    // can answer; the wire form has to be ATYP=4 with the address bytes.
+    name: 'an IPv6 SOCKS5 target is sent as a domain again',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /socks5: IPv6 target is sent as ATYP=4 with 16 address bytes/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace('  } else if (isIPv6(targetHost)) {', '  } else if (false) {')
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer encodes IPv6 targets')
       writeFileSync(p, after)
     },
   },

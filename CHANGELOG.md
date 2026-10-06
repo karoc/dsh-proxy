@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.15] - 2026-10-06
+
+### Fixed
+
+- **A SOCKS5 upstream was sent IPv6 targets as DOMAIN names.** The handshake chose
+  between `ATYP=1` (IPv4) and `ATYP=3` (domain) only, so `2001:db8::1` went out as a
+  hostname no resolver can answer. It now sends `ATYP=4` with the 16 address bytes:
+  `ipv6ToBytes()` expands the compressed form, the full eight-group form, an
+  embedded IPv4 tail (`::ffff:1.2.3.4`) and drops a zone id (which has no wire
+  representation). An address that cannot be encoded fails loudly instead of being
+  sent as a name. G25 pins it, with a negative control that re-injects the domain
+  branch.
+
+### Notes
+
+- The dsh-desktop shell carries a copy of this engine and had the same
+  empty-provider defect plus the older loopback rule (literal `127.0.0.1` only,
+  bare `::1` only). Both are fixed in that repository — its provider list now
+  reads the active profile's document, and its routing/observation/provider code
+  uses the same shared classifier and CONNECT-authority parsing as here. Changes
+  are committed there on a branch (commit `6bb8316`), per that repo's PR-only rule.
+
 ## [0.1.14] - 2026-10-06
 
 ### Fixed

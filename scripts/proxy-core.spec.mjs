@@ -21,7 +21,7 @@ import {
   providerHostsFromEntries, resolveProviderHosts,
   sanitizeUpstream, writeProxyConfig, normalizeHost, defaultProxyConfig,
   normalizeListenPort, normalizeRouteMode, isLoopbackHost, normalizeHostForMatch,
-  parseConnectAuthority, formatAuthority,
+  parseConnectAuthority, formatAuthority, ipv6ToBytes,
 } from '../src/proxy-core.ts'
 
 const work = mkdtempSync(join(tmpdir(), 'dsh-proxy-'))
@@ -409,6 +409,7 @@ writeCfg({
           let port = 0
           if (atyp === 0x01) { host = [...buf.slice(4, 8)].join('.'); port = buf.readUInt16BE(8) }
           else if (atyp === 0x03) { const l = buf[4]; host = buf.slice(5, 5 + l).toString(); port = buf.readUInt16BE(5 + l) }
+          else if (atyp === 0x04) { host = `ipv6:${buf.slice(4, 20).toString('hex')}`; port = buf.readUInt16BE(20) }
           s5seen.push(`${host}:${port}`)
           socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])) // success, BND 0.0.0.0:0
           buf = buf.slice(4 + need)
@@ -437,6 +438,29 @@ writeCfg({
     assert.ok(s5seen.includes('socks-target.example:443'), `socks5 upstream saw CONNECT to the target (got ${JSON.stringify(s5seen)})`)
     sock.destroy()
   }
+  // An IPv6 target must go out as ATYP=4 with the 16 address bytes — not as a
+  // domain name that no resolver can answer.
+  {
+    s5seen.length = 0
+    writeCfg({
+      upstream: { enabled: true, protocol: 'socks5', host: '127.0.0.1', port: s5Port, username: '', password: '' },
+      proxiedHosts: ['2001:db8::1', '[2001:db8::1]', '::ffff:1.2.3.4'],
+      knownHosts: [],
+    })
+    const compressed = await rawConnect(proxyPort, '[2001:db8::1]:443')
+    compressed.sock.destroy()
+    assert.ok(
+      s5seen.includes('ipv6:20010db8000000000000000000000001:443'),
+      `socks5: IPv6 target is sent as ATYP=4 with 16 address bytes (got ${JSON.stringify(s5seen)})`,
+    )
+    const mapped = await rawConnect(proxyPort, '[::ffff:1.2.3.4]:8443')
+    mapped.sock.destroy()
+    assert.ok(
+      s5seen.includes('ipv6:00000000000000000000ffff01020304:8443'),
+      `socks5: an IPv4-mapped IPv6 target keeps its embedded address (got ${JSON.stringify(s5seen)})`,
+    )
+    s5seen.length = 0
+  }
   // A plain http:// target with a socks5 upstream falls back to DIRECT.
   {
     s5seen.length = 0
@@ -450,6 +474,18 @@ writeCfg({
     assert.equal(s5seen.length, 0, 'socks5 upstream not touched for an http target')
   }
   s5.close()
+}
+
+// ── scenario 12b: IPv6 text -> 16 wire bytes (SOCKS5 ATYP=4) ────────────────
+{
+  assert.equal(ipv6ToBytes('::1').toString('hex'), '00000000000000000000000000000001', '::1 expands')
+  assert.equal(ipv6ToBytes('2001:db8::1').toString('hex'), '20010db8000000000000000000000001', 'the compressed form expands')
+  assert.equal(ipv6ToBytes('2001:0db8:0000:0000:0000:0000:0000:0001').toString('hex'), '20010db8000000000000000000000001', 'the full form expands to the same bytes')
+  assert.equal(ipv6ToBytes('::ffff:1.2.3.4').toString('hex'), '00000000000000000000ffff01020304', 'an embedded IPv4 tail expands')
+  assert.equal(ipv6ToBytes('fe80::1%eth0').toString('hex'), 'fe800000000000000000000000000001', 'a zone id is dropped (it has no wire form)')
+  assert.equal(ipv6ToBytes('1:2:3'), null, 'a short form without :: is rejected')
+  assert.equal(ipv6ToBytes('not:an:address'), null, 'garbage is rejected')
+  assert.equal(ipv6ToBytes(''), null, 'empty input is rejected')
 }
 
 // ── scenario 13: settings-page helpers (sanitize / write / normalize) ───────
