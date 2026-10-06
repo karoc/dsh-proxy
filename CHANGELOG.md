@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.1.9] - 2026-10-06
+
+### Fixed
+
+- **The plugin no longer needs the user to touch their service definition.**
+  0.1.7 shipped the honest but demanding answer: dsh resolves its egress policy
+  from the LAUNCH environment before plugins mount, so model traffic could only
+  be routed by editing the service unit. That is not the whole truth — the
+  harness's own policy installer is reachable from a plugin, and layering a
+  policy is a behaviour its suite covers. `src/egress.ts` now resolves
+  `@deepseek-ai/dsh-http-proxy` (anchored at the active profile, so the import
+  lands on the same module instance the harness uses) and installs a policy
+  pointing http/https at this plugin's listener **when, and only when, the launch
+  environment declared no proxy at all**. Model calls, web fetch and web search
+  then ride this proxy with per-host routing intact — zero configuration.
+
+  The condition is a correctness rule, not politeness: this plugin's proxy sends
+  un-ticked hosts DIRECT, so layering it over a launcher's proxy would silently
+  bypass that launcher's egress policy. A launcher that already decides egress
+  keeps deciding it, and the page says so. An unresolvable policy package is
+  reported as `unavailable` (the page then prints the environment-variable
+  fallback) rather than being papered over.
+
+- **`listenPort` defaults to `0` (ephemeral) again.** With self-installed egress
+  a fixed port is no longer needed; it remains the opt-in for deployments where
+  the launcher declares the proxy itself (`HTTP_PROXY=http://127.0.0.1:<listenPort>`).
+  0.1.7's fixed default (45999) is withdrawn before publication — it would have
+  made two dsh instances on one machine warn about a port nobody needs.
+
+- The settings page now distinguishes four egress states (self-installed /
+  launch environment / another launcher proxy owns egress / unavailable) instead
+  of assuming the launch environment is the only way.
+
+### Added
+
+- `scripts/egress.spec.mjs` (decision + resolution + failure reporting) wired
+  into `npm test` and `verify:all`; guarantees G18–G19 pin "never displace a
+  launcher proxy" and "a failed self-install is reported"; negative controls
+  re-inject both defects and must redden the suite.
+
 ## [0.1.8] - 2026-10-06
 
 ### Fixed

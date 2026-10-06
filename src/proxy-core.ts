@@ -180,7 +180,7 @@ export function defaultProxyConfig(): ProxyConfig {
     upstream: { enabled: false, protocol: 'http', host: '', port: 0, username: '', password: '' },
     proxiedHosts: [],
     knownHosts: [],
-    listenPort: DEFAULT_LISTEN_PORT,
+    listenPort: 0,
   }
 }
 
@@ -192,11 +192,7 @@ export function readProxyConfig(configFile: string): ProxyConfig {
       ...defaultProxyConfig(),
       ...(raw ?? {}),
       upstream: { ...defaultProxyConfig().upstream, ...(raw?.upstream ?? {}) },
-      // An existing proxy.json predates this field: it adopts the fixed default
-      // (that is what makes the launch-environment setup work without a second
-      // restart). An EXPLICIT value — including 0, meaning "ephemeral" — wins,
-      // and a garbage value degrades to ephemeral rather than blocking the bind.
-      listenPort: raw?.listenPort === undefined ? DEFAULT_LISTEN_PORT : normalizeListenPort(raw.listenPort),
+      listenPort: normalizeListenPort(raw?.listenPort),
     }
   } catch {
     return defaultProxyConfig()
@@ -816,28 +812,20 @@ export interface ProxyConfig {
   proxiedHosts: string[]
   knownHosts: string[]
   /**
-   * Port the forward proxy listens on: a FIXED port so a launcher can name it
-   * in the process environment, or 0 for an ephemeral one. dsh resolves its
-   * egress policy from the LAUNCH environment before any plugin mounts, so a
-   * fixed port is what lets in-process traffic (model requests) ride this proxy
-   * — see {@link DEFAULT_LISTEN_PORT}.
+   * Port the forward proxy listens on: 0 (default) for an ephemeral one, or a
+   * fixed port for deployments where the LAUNCH environment names this proxy
+   * itself (`HTTP_PROXY=http://127.0.0.1:<listenPort>` in the service
+   * environment). dsh's own requests are routed by the policy this plugin
+   * installs at runtime (src/egress.ts), which is why a fixed port is optional:
+   * a launcher-declared proxy has to be known before dsh starts, and a plugin's
+   * self-installed one does not.
+   *
+   * A fixed port that is taken falls back to an ephemeral one and SAYS SO
+   * (`portHonored: false` in the view) — a launcher naming the taken port would
+   * otherwise send in-process egress nowhere.
    */
   listenPort: number
 }
-
-/**
- * Default listen port. Fixed rather than ephemeral so the launch environment can
- * name this proxy without a restart dance: `HTTP_PROXY=http://127.0.0.1:45999`
- * (plus `HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) in the service environment, and
- * dsh installs an egress policy pointing here at boot — which is what routes the
- * harness's OWN requests (model calls, web fetch) through this proxy. Children
- * already inherit the environment and need no fixed port.
- *
- * When the port is taken the proxy falls back to an ephemeral one and SAYS SO
- * (`portHonored: false` in the view), so a launcher that named 45999 can see why
- * in-process egress is failing instead of guessing.
- */
-export const DEFAULT_LISTEN_PORT = 45999
 
 /** Coerce a stored/edited listen port: integer 1..65535, anything else -> 0 (ephemeral). */
 export function normalizeListenPort(value: unknown): number {

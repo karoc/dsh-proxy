@@ -50,6 +50,10 @@ export interface ProxyView {
   launchProxy: string | null
   /** Whether dsh's own in-process requests (model calls) ride this proxy. */
   inProcessRouted: boolean
+  /** What put dsh's own requests behind this proxy, or why nothing did. */
+  egressStatus: 'self-installed' | 'launcher' | 'unavailable'
+  /** Reason for a non-routing status; shown to the user. */
+  egressDetail: string | null
   upstream: UpstreamDraft
   proxiedHosts: string[]
   knownHosts: string[]
@@ -400,14 +404,17 @@ function ProxySectionLoaded(props: { t: (key: keyof typeof en) => string }): Rea
           : (
             <div className="dsh-proxy-egress">
               <div className={`dsh-proxy-note ${view.inProcessRouted ? 'dsh-proxy-note-ok' : 'dsh-proxy-note-warn'}`}>
-                {(view.inProcessRouted ? t('egressRouted') : t('egressNotRouted'))
-                  .replace('{port}', String(view.port ?? ''))}
+                {(view.inProcessRouted
+                  ? (view.egressStatus === 'launcher' ? t('egressRoutedLauncher') : t('egressRoutedSelf'))
+                  : (view.egressStatus === 'launcher' ? t('egressLauncherOther') : t('egressUnavailable')))
+                  .replace('{port}', String(view.port ?? ''))
+                  .replace('{proxy}', String(view.launchProxy ?? ''))
+                  .replace('{detail}', String(view.egressDetail ?? ''))}
               </div>
-              {!view.inProcessRouted && (
+              {!view.inProcessRouted && view.egressStatus === 'unavailable' && (
                 <>
                   <p>{t('egressSnippetLabel')}</p>
                   <div className="dsh-proxy-snippet">{`Environment="HTTP_PROXY=http://127.0.0.1:${launchPort}" "HTTPS_PROXY=http://127.0.0.1:${launchPort}" "ALL_PROXY=http://127.0.0.1:${launchPort}" "NO_PROXY=127.0.0.1,localhost,::1" "NODE_USE_ENV_PROXY=1"`}</div>
-                  {view.listenPort === 0 && <div className="dsh-proxy-note dsh-proxy-note-warn">{t('egressEphemeral')}</div>}
                 </>
               )}
               {!view.portHonored && view.portRequested > 0 && (

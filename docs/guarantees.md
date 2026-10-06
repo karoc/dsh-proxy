@@ -27,3 +27,5 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G15 | settings 读取**失败或服务缺席**时 `/proxy/api` 仍返回 200 并回退到 legacy 文档，不把设置页打挂 | `a throwing settings read keeps GET /proxy/api at 200` |
 | G16 | 固定监听端口被占用时**回退到随机端口并显式报告**（`portHonored:false` + 日志点名该端口），绝不静默让启动环境指向空端口 | `requested listen port taken -> falls back and reports it` |
 | G17 | 「进程内流量走了本代理」**只在启动环境确实指向本监听端口**时为真——别的目标、别的端口、没有启动代理都判否，观测到的主机再多也不影响 | `launch proxy pointing elsewhere is not in-process routing` |
+| G18 | 启动环境**已声明代理**时，插件绝不 layer/抢占 egress（本插件的代理把未勾选主机直连，覆盖上去等于静默绕过启动方的策略） | `a launcher-declared proxy is never displaced by the plugin` |
+| G19 | 自装 harness 出网策略**失败必须显式报告**（页面给出启动环境兜底），绝不把"没装上"当成"已代理" | `an unresolvable policy package is reported as unavailable` |

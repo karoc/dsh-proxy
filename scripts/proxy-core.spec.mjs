@@ -20,7 +20,7 @@ import {
   createForwardProxy, readProxyConfig, shouldProxy, providerHostsFromSettings,
   providerHostsFromEntries, resolveProviderHosts,
   sanitizeUpstream, writeProxyConfig, normalizeHost, defaultProxyConfig,
-  normalizeListenPort, DEFAULT_LISTEN_PORT,
+  normalizeListenPort,
 } from '../src/proxy-core.ts'
 
 const work = mkdtempSync(join(tmpdir(), 'dsh-proxy-'))
@@ -589,10 +589,10 @@ writeCfg({
   assert.equal(normalizeListenPort(70000), 0, 'out-of-range port becomes ephemeral')
   assert.equal(normalizeListenPort(-1), 0, 'negative port becomes ephemeral')
   assert.equal(normalizeListenPort('nonsense'), 0, 'garbage becomes ephemeral')
-  assert.equal(defaultProxyConfig().listenPort, DEFAULT_LISTEN_PORT, 'default config pins a fixed listen port')
+  assert.equal(defaultProxyConfig().listenPort, 0, 'default config listens on an ephemeral port (a fixed one is opt-in for launcher-declared deployments)')
 
   const cfgPath = join(work, 'listen.json')
-  assert.equal(readProxyConfig(cfgPath).listenPort, DEFAULT_LISTEN_PORT, 'missing proxy.json -> default fixed listen port')
+  assert.equal(readProxyConfig(cfgPath).listenPort, 0, 'missing proxy.json -> ephemeral listen port')
   writeProxyConfig(cfgPath, {}, [], 12345)
   assert.equal(readProxyConfig(cfgPath).listenPort, 12345, 'written listen port is stored and read back')
   writeProxyConfig(cfgPath, {}, [])

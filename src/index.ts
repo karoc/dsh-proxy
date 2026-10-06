@@ -30,8 +30,9 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { createPolicyImporter, installInProcessEgress, type EgressOutcome, type LaunchProxy } from './egress.ts'
 import {
   createForwardProxy,
   readProxyConfig,
@@ -110,12 +111,16 @@ export interface ProxyView {
   /** Proxy URL the LAUNCH environment named, if any (credentials masked). */
   launchProxy: string | null
   /**
-   * Whether that launch proxy points at THIS listener — the condition under
-   * which dsh's own in-process requests (model calls, web fetch/search) ride
-   * this proxy. False means they are NOT routed through it, whatever the
-   * observed-host list below happens to show.
+   * Whether dsh's own in-process requests (model calls, web fetch/search) ride
+   * this proxy — true when this plugin installed the harness policy, or when the
+   * launch environment names this very listener. False means they are NOT routed
+   * through it, whatever the observed-host list below happens to show.
    */
   inProcessRouted: boolean
+  /** What put dsh's own requests behind this proxy, or why nothing did. */
+  egressStatus: 'self-installed' | 'launcher' | 'unavailable'
+  /** Reason for a non-routing status (page copy); null when routed. */
+  egressDetail: string | null
   upstream: UpstreamConfig
   proxiedHosts: string[]
   knownHosts: string[]
@@ -127,9 +132,6 @@ export interface ProxyView {
 
 /** Environment names a launcher may have used to point dsh at a proxy, in resolution order. */
 const LAUNCH_PROXY_NAMES = ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'] as const
-
-/** The proxy the LAUNCH environment named, captured before this plugin rewrites the variables. */
-export interface LaunchProxy { name: string; value: string }
 
 /**
  * Read the launch-time proxy variable, before {@link startProxy} publishes this
@@ -193,9 +195,10 @@ function liveSettingsDocument(ctx: Context): unknown {
 }
 
 /** Build the fresh settings view. */
-function viewOf(forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[], launch: LaunchProxy | null): ProxyView {
+function viewOf(forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[], launch: LaunchProxy | null, egress: () => EgressOutcome): ProxyView {
   const cfg = forwardProxy.config()
   const port = forwardProxy.currentPort
+  const policy = egress()
   return {
     ok: true,
     port,
@@ -203,7 +206,9 @@ function viewOf(forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[
     portRequested: forwardProxy.requestedPort,
     portHonored: forwardProxy.portHonored(),
     launchProxy: launch === null ? null : maskProxyUrl(launch.value),
-    inProcessRouted: launchProxyTargetsPort(launch, port),
+    inProcessRouted: policy.status === 'self-installed' || launchProxyTargetsPort(launch, port),
+    egressStatus: policy.status,
+    egressDetail: policy.detail,
     upstream: cfg.upstream,
     proxiedHosts: cfg.proxiedHosts,
     knownHosts: cfg.knownHosts,
@@ -287,7 +292,13 @@ function startProxy(opts: { configFile: string; log: (line: string) => void }): 
 }
 
 /** Register the /proxy/api route (GET view, POST save/test/persist). */
-function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, providers: () => ProviderHost[], launch: LaunchProxy | null): void {
+function registerWebApi(
+  ctx: Context,
+  forwardProxy: ForwardProxyHandle,
+  providers: () => ProviderHost[],
+  launch: LaunchProxy | null,
+  egress: () => EgressOutcome,
+): void {
   const server = ctx.get('webServer') as
     | { register: (route: { kind: 'prefix'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }) => () => void }
     | undefined
@@ -308,7 +319,7 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, provider
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = req.method ?? 'GET'
     if (method === 'GET') {
-      sendJson(res, 200, viewOf(forwardProxy, providers, launch))
+      sendJson(res, 200, viewOf(forwardProxy, providers, launch, egress))
       return
     }
     if (method === 'POST') {
@@ -334,7 +345,7 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, provider
               Array.isArray(body.proxiedHosts) ? body.proxiedHosts : [],
               body.listenPort,
             )
-            sendJson(res, 200, { ...viewOf(forwardProxy, providers, launch), upstream: cfg.upstream, proxiedHosts: cfg.proxiedHosts })
+            sendJson(res, 200, { ...viewOf(forwardProxy, providers, launch, egress), upstream: cfg.upstream, proxiedHosts: cfg.proxiedHosts })
           } catch (error) {
             sendJson(res, 400, { ok: false, error: `dsh-proxy: save failed: ${(error as Error).message}` })
           }
@@ -347,7 +358,7 @@ function registerWebApi(ctx: Context, forwardProxy: ForwardProxyHandle, provider
         }
         case 'persist': {
           try { forwardProxy.persistKnownHosts() } catch { /* best-effort */ }
-          sendJson(res, 200, viewOf(forwardProxy, providers, launch))
+          sendJson(res, 200, viewOf(forwardProxy, providers, launch, egress))
           return
         }
         default:
@@ -378,15 +389,57 @@ export function apply(ctx: Context): void {
   // own requests (model calls) are routed through this proxy.
   const launch = readLaunchProxy()
   const forwardProxy = startProxy({ configFile: proxyConfigPath(), log })
+
+  /**
+   * Where the harness's policy package can be resolved from, most specific
+   * first: the active profile (the harness resolved it from there, so importing
+   * the same file shares one module instance — which is what makes
+   * `proxyRouteFor` callers see this policy too), then the dsh entry point.
+   */
+  const policyAnchors = (): string[] => {
+    const anchors: string[] = []
+    try {
+      const settings = ctx.get('settings') as { documentPath?: unknown } | undefined
+      if (typeof settings?.documentPath === 'string') anchors.push(join(dirname(settings.documentPath), 'package.json'))
+    } catch { /* no settings service — the other anchors still apply */ }
+    const entry = process.argv[1]
+    if (typeof entry === 'string' && isAbsolute(entry)) anchors.push(entry)
+    anchors.push(join(process.cwd(), 'package.json'))
+    return anchors
+  }
+  let outcome: EgressOutcome = { status: 'unavailable', detail: 'the forward proxy is not listening yet', dispose: null }
+  // Install the harness's own egress policy once the listener is up, so dsh's
+  // requests (model calls, web fetch) ride this proxy — see src/egress.ts for
+  // why a plugin must do this rather than publish env vars.
+  void forwardProxy.port.then(async (port) => {
+    if (port <= 0) {
+      outcome = { status: 'unavailable', detail: 'the forward proxy could not bind any port', dispose: null }
+      return
+    }
+    outcome = await installInProcessEgress({
+      proxyUrl: `http://127.0.0.1:${port}`,
+      launch,
+      importer: createPolicyImporter(policyAnchors()),
+      log,
+    })
+    log(`dsh-proxy: in-process egress ${outcome.status}${outcome.detail === null ? '' : ` — ${outcome.detail}`}`)
+  }).catch((error) => {
+    outcome = { status: 'unavailable', detail: (error as Error).message, dispose: null }
+  })
   // Read the provider list per request: a settings edit (add/rename a provider
   // route) reaches the page on the next load, like every other value here.
   const providers = (): ProviderHost[] => resolveProviderHosts({
     live: liveSettingsDocument(ctx),
     legacyPath: settingsPath(),
   })
-  registerWebApi(ctx, forwardProxy, providers, launch)
+  registerWebApi(ctx, forwardProxy, providers, launch, () => outcome)
 
   ctx.effect(() => () => {
-    try { forwardProxy.close() } catch { /* already closed */ }
+    // Restore the previous egress policy BEFORE closing the listener: the other
+    // order leaves a window where the installed policy points at a dead port.
+    void (async () => {
+      try { await outcome.dispose?.() } catch { /* policy already disposed */ }
+      try { forwardProxy.close() } catch { /* already closed */ }
+    })()
   }, 'dsh-proxy: teardown')
 }

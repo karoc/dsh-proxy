@@ -135,36 +135,34 @@ dsh plugin --profile web update @karoc/dsh-proxy
 
 Then **restart `dsh web`** so the new client bundle loads.
 
-### Putting dsh's own requests behind the proxy (fixed port)
+### dsh's own requests (model calls) ride this proxy automatically
 
-The proxy handles every outbound request of the process it runs in — but only the
-ones actually *routed* to it:
+The proxy has two kinds of clients, and they are wired differently:
 
 - **Child processes** (bash, npm, pnpm, git, curl…) inherit the `*PROXY`
-  variables this plugin publishes, so they are proxied with no extra setup.
+  variables this plugin publishes — no setup.
 - **dsh's own requests** (model calls, web fetch/search) are routed by the
-  harness's egress policy, which dsh installs **from the environment it was
-  LAUNCHED with, before any plugin loads**. No plugin can set that up afterwards.
+  harness's egress policy, which dsh resolves from the environment it was
+  LAUNCHED with, before any plugin loads. When that environment declared no
+  proxy, this plugin installs the same policy itself, pointing at its own
+  listener, once the listener is up (`src/egress.ts`). Nothing to configure.
 
-To put model traffic behind this proxy, name it in the launch environment. That is
-why the proxy listens on a fixed port (`listenPort` in `proxy.json`, default
-`45999`) instead of a random one:
+Settings → Smoothly Proxy states which of the following is true:
 
-```ini
-# systemd user unit for dsh web — [Service] section
-Environment="HTTP_PROXY=http://127.0.0.1:45999" "HTTPS_PROXY=http://127.0.0.1:45999" \
-            "ALL_PROXY=http://127.0.0.1:45999" "NO_PROXY=127.0.0.1,localhost,::1" \
-            "NODE_USE_ENV_PROXY=1"
-```
-
-Then restart dsh once. **Settings → Smoothly Proxy says which of the two is in
-effect** and prints this line for your port; if the fixed port is taken, the proxy
-falls back to an ephemeral one and reports it (`portHonored: false`) — silently
-pointing a launcher at a port nothing listens on would send in-process egress
-nowhere.
-
-Prefer a single hop? Pointing the launch environment straight at your upstream
-proxy also works — you then lose per-host routing for in-process traffic.
+- **routed, self-installed** — the normal case: model traffic follows the host
+  checkboxes above, per host.
+- **routed, launch environment** — your launcher declared
+  `HTTP_PROXY=http://127.0.0.1:<listenPort>`, so dsh installed the policy before
+  the plugin did; set `listenPort` (`proxy.json`) to a fixed port to keep that
+  address stable across restarts.
+- **a launcher proxy owns egress** — the launch environment declared a
+  *different* proxy. This plugin deliberately does **not** layer over it (its own
+  proxy sends un-ticked hosts direct, which would silently bypass the launcher's
+  policy). Point the launcher at this proxy, or drop the variable, to use
+  per-host routing for dsh's own requests.
+- **unavailable** — the harness policy package could not be resolved in this
+  composition (unusual layouts). The page then prints the exact `Environment=`
+  line to declare instead, and everything else keeps working.
 
 ### Removing
 

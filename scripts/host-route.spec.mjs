@@ -131,6 +131,11 @@ async function run() {
     assert.equal(body.inProcessRouted, true, 'launch environment naming this port -> in-process traffic is routed here')
     assert.ok(String(body.launchProxy).includes('127.0.0.1'), 'the launch proxy is reported')
     assert.ok(!String(body.launchProxy).includes('secret'), 'launch proxy credentials never leave the process')
+    // A launcher that already decides egress keeps deciding it: this plugin's
+    // proxy sends non-ticked hosts DIRECT, so layering a policy over the
+    // launcher's would silently bypass it.
+    assert.equal(body.egressStatus, 'launcher', 'a launch-environment proxy owns egress; the plugin does not install over it')
+    assert.ok(String(body.egressDetail).includes('HTTP_PROXY'), 'the page can name the variable that owns egress')
 
     // The flag must not be optimistic: anything else means dsh's own requests
     // do NOT ride this proxy.

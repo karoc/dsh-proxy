@@ -167,6 +167,38 @@ const scenarios = [
       writeFileSync(p, after)
     },
   },
+  {
+    // A launcher that already decides egress must keep deciding it: this
+    // plugin's proxy sends non-ticked hosts DIRECT, so layering over the
+    // launcher's policy would silently bypass it.
+    name: 'self-installed egress displaces a launcher proxy',
+    command: 'node --test scripts/egress.spec.mjs',
+    expect: /a launcher-declared proxy is never displaced by the plugin/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/egress.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace('if (opts.launch !== null) {', 'if (false) {')
+      if (after === before) throw new Error('mutation did not apply — src/egress.ts no longer guards against the launcher proxy')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // "Installed" must never be assumed: an unresolvable policy package has to
+    // surface as unavailable so the page can offer the environment fallback.
+    name: 'a failed egress self-install claims success',
+    command: 'node --test scripts/egress.spec.mjs',
+    expect: /an unresolvable policy package is reported as unavailable/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/egress.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace(
+        "    return { status: 'unavailable', detail: (error as Error).message, dispose: null }\n  }\n  const values",
+        "    return { status: 'self-installed', detail: null, dispose: null }\n  }\n  const values",
+      )
+      if (after === before) throw new Error('mutation did not apply — src/egress.ts no longer reports an unresolvable policy package')
+      writeFileSync(p, after)
+    },
+  },
 ]
 
 let failed = 0
