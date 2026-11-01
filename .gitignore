@@ -25,3 +25,6 @@ pnpm-debug.log*
 # Agent workspace metadata (internal, not part of the published project)
 .agents/
 KANBAN.json
+
+# publish:release pack record (gitignored)
+.verify/

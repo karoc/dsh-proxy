@@ -10,14 +10,14 @@
  *   3. definite 404        → exit 1 (version and package document both absent)
  *   4. tag lags behind     → exit 0 (advisory warning only)
  *   5. tag ahead           → exit 0 (advisory warning only)
- *   6. tarball HTTP 404    → exit 1 after one retry
+ *   6. tarball HTTP 404    → exit 0: publication CONFIRMED, propagation warning
  *   7. tarball not gzip    → exit 1
  *   8. listing misses file → exit 1
  *   9. registry unreachable→ exit 0 (transport failures never fail a release)
  *  10. tarball 503         → exit 0 (answered but unusable, retried once)
  *  11. tarball 407         → exit 0 (proxy refusal, retried once)
  *  12. tarball 403         → exit 1 (retried once, then fatal)
- *  13. truncated gzip      → exit 0 (unreadable tar stream = transport)
+ *  13. truncated gzip      → exit 1 (complete 2xx body that is not a readable tar = corrupt artifact)
  *  14. hanging endpoint    → exit 0 (fetch timeout + curl fallback)
  *  15. no tarball URL      → exit 0 with a re-run instruction
  *
@@ -25,6 +25,7 @@
  */
 import { execSync, spawn } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -35,6 +36,15 @@ const source = join(here, 'post-publish-check.mjs')
 const version = '1.2.3'
 const files = ['lib/index.js', 'cordis.patch.yml', 'README.md', 'LICENSE']
 const libBody = 'module.exports = {}\n// fixture artifact\n'
+/** sha512 integrity of one served body, as npm records it in dist.integrity. */
+const sha512 = (buffer) => createHash('sha512').update(buffer).digest('base64')
+/** The bytes this scenario's /tarball/<mode> route serves (present modes only). */
+const servedBytes = (mode) => mode === 'missing-entry'
+  ? tarballs.missing
+  : mode === 'truncated'
+    ? tarballs.ok.subarray(0, Math.floor(tarballs.ok.length / 2))
+    : tarballs.ok
+const distDoc = (mode) => ({ tarball: `${base}/tarball/${mode}`, integrity: `sha512-${sha512(servedBytes(mode))}` })
 
 const work = mkdtempSync(join(tmpdir(), 'dsh-postpublish-fixture-'))
 const pkgRoot = join(work, 'pkg')
@@ -94,6 +104,13 @@ const state = {
   versionVisible: true,
   packageVisible: true,
   omitTarball: false,
+  /**
+   * Whether the registry serves the version's tarball at the deterministic npm
+   * URL (`/<name>/-/<basename>-<version>.tgz`). That URL is the discriminator
+   * between "the upload landed, the index lags" and "the registry never created
+   * this version" — npm exits 0 when the publish PUT is answered 202.
+   */
+  syntheticTarball: 'present',
 }
 
 /** Per-scenario request counters (reset by the loop). */
@@ -110,11 +127,16 @@ const server = createServer((request, response) => {
           [version]: {
             name: 'fixture-pkg',
             version,
-            ...(state.omitTarball ? {} : { dist: { tarball: `${base}/tarball/${state.mode}` } }),
+            ...(state.omitTarball ? {} : { dist: distDoc(state.mode) }),
           },
         }
       : {},
   })
+  if (path === '/-/ping') {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end('{}')
+    return
+  }
   if (path === '/fixture-pkg') {
     if (!state.packageVisible) {
       response.writeHead(404, { 'content-type': 'application/json' })
@@ -135,8 +157,20 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({
       name: 'fixture-pkg',
       version,
-      ...(state.omitTarball ? {} : { dist: { tarball: `${base}/tarball/${state.mode}` } }),
+      ...(state.omitTarball ? {} : { dist: distDoc(state.mode) }),
     }))
+    return
+  }
+  if (path === `/fixture-pkg/-/fixture-pkg-${version}.tgz`) {
+    // The synthetic npm tarball layout, probed with HEAD (and GET as fallback).
+    if (state.syntheticTarball === 'absent') {
+      response.writeHead(404, { 'content-type': 'text/html' })
+      response.end('<!DOCTYPE html><title>Not Found</title>')
+      return
+    }
+    response.writeHead(200, { 'content-type': 'application/octet-stream' })
+    if (request.method === 'HEAD') response.end()
+    else response.end(tarballs.ok)
     return
   }
   if (path.startsWith('/tarball/')) {
@@ -198,6 +232,8 @@ function runCheck(overrides = {}) {
     DSH_POSTPUBLISH_REGISTRY_BASE: overrides.registry ?? base,
     DSH_POSTPUBLISH_ATTEMPTS: '2',
     DSH_POSTPUBLISH_INTERVAL_MS: '50',
+    DSH_POSTPUBLISH_TARBALL_ATTEMPTS: '2',
+    DSH_POSTPUBLISH_TARBALL_INTERVAL_MS: '10',
     DSH_POSTPUBLISH_TARBALL_TIMEOUT_MS: '800',
   })
   return new Promise((resolve) => {
@@ -226,16 +262,36 @@ const scenarios = [
       && result.output.includes('release is live and consistent'),
   },
   {
-    name: 'index lag (version unindexed, package live)',
-    setup: () => Object.assign(state, { mode: 'normal', tag: version, versionVisible: false, packageVisible: true }),
+    name: 'index lag (version unindexed, package live, tarball already served)',
+    setup: () => Object.assign(state, {
+      mode: 'normal', tag: version, versionVisible: false, packageVisible: true, syntheticTarball: 'present',
+    }),
     expect: (result) => result.code === 0
       && result.output.includes('is not indexed yet')
+      && result.output.includes('the version tarball is served, so this release materialized')
+      && !result.output.includes('is NOT on the registry')
       && result.output.includes('Re-run to complete the checks'),
+  },
+  {
+    // The live 0.4.7 incident: npm exited 0 because the registry answered 202
+    // Accepted, while the version document AND its tarball both 404 — and the
+    // version DID become live much later without a retry. The check must report
+    // the ambiguity (unserved ≠ dropped) instead of claiming either extreme.
+    name: 'accepted-but-not-visible-yet (version document and tarball both 404)',
+    setup: () => Object.assign(state, {
+      mode: 'normal', tag: '1.2.2', versionVisible: false, packageVisible: true, syntheticTarball: 'absent',
+    }),
+    expect: (result) => result.code === 0
+      && result.output.includes('is not served by the registry yet')
+      && result.output.includes('202 Accepted')
+      && result.output.includes('AMBIGUOUS')
+      && result.output.includes('do NOT re-publish')
+      && !result.output.includes('the upload landed'),
   },
   {
     name: 'definite 404 for version and package',
     setup: () => Object.assign(state, { mode: 'normal', versionVisible: false, packageVisible: false }),
-    expect: (result) => result.code === 1 && result.output.includes('definite 404'),
+    expect: (result) => result.code === 1 && result.output.includes('cache-bypassed 404'),
   },
   {
     name: 'tag lags behind',
@@ -250,7 +306,7 @@ const scenarios = [
   {
     name: 'tarball HTTP 404',
     setup: () => Object.assign(state, { mode: 'tarball-404', tag: version, versionVisible: true, packageVisible: true }),
-    expect: (result) => result.code === 1 && result.output.includes('HTTP 404') && hits.tarball === 2,
+    expect: (result) => result.code === 0 && result.output.includes('Do NOT re-publish') && hits.tarball >= 2,
   },
   {
     name: 'tarball not gzip',
@@ -286,9 +342,9 @@ const scenarios = [
     expect: (result) => result.code === 1 && result.output.includes('HTTP 403') && hits.tarball === 2,
   },
   {
-    name: 'tarball truncated (gzip magic ok, stream broken, non-fatal)',
+    name: 'tarball truncated (gzip magic ok, stream broken, corrupt artifact, fatal)',
     setup: () => Object.assign(state, { mode: 'truncated', tag: version, versionVisible: true, packageVisible: true }),
-    expect: (result) => result.code === 0 && result.output.includes('could not list the published tarball') && hits.tarball === 1,
+    expect: (result) => result.code === 1 && result.output.includes('not a readable tar archive') && hits.tarball === 1,
   },
   {
     name: 'tarball hangs (timeout + curl fallback, non-fatal)',
