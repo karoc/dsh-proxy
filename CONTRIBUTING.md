@@ -71,9 +71,17 @@ Release steps:
 # 1. write code + update README.md/README.zh.md + CHANGELOG.md together
 # 2. bump version in package.json
 git add -A && git commit -m "dsh-proxy v<version>"
-git tag v<version> && git push origin v<version>
+git tag v<version>
 pnpm release:check
 ```
+
+**Keep the tag local until the upload lands.** An unpublished version is allowed
+to move: if the release still needs commits (a gate fix, a re-run of
+verification), re-point the tag with `git tag -f v<version>` at the new HEAD and
+re-run `pnpm verify:all` — the report and the tag must name the same commit.
+Push the tag only after the registry confirms the version
+(`git push origin v<version>`). Pushing it earlier freezes it: a later fix then
+needs a force-push, and the remote advertises a release that is not on npm.
 
 ### Publishing is a manual step (2FA)
 
@@ -84,13 +92,16 @@ passing, `npm pack --dry-run` content confirmed), then the human runs:
 
 ```sh
 npm login     # 2FA
-npm publish   # runs the gate (prepack/prepublishOnly), then postpublish verifies
+npm run publish:release   # gate → build → pack → verify the tarball → publish → advisory verify
 ```
 
-`npm publish --ignore-scripts` bypasses all gates and post-publish verification
-— treat it as a process violation. After a successful publish, `postpublish`
-polls the registry until the version is visible and verifies `dist-tags.latest`
-plus the tarball contents.
+`npm publish` is still gated (prepack/prepublishOnly), but it rebuilds after the
+gate and forwards a failing `postpublish` exit code — `publish:release` is the
+path that publishes the bytes it verified. `npm publish --ignore-scripts`
+bypasses all gates and post-publish verification — treat it as a process
+violation. After a successful publish, the post-publish check polls the registry
+until the version is visible and verifies `dist-tags.latest` plus the tarball
+contents; then push the tag (`git push origin v<version>`).
 
 ### Known release-check "failures" that are actually fine
 
