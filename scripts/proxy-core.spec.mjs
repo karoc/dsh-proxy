@@ -104,9 +104,13 @@ const proxy = createForwardProxy({
 })
 const proxyPort = await proxy.port
 
+// `agent: false` keeps the CLIENT out of any ambient env proxy (the plugin sets
+// NODE_USE_ENV_PROXY for the processes it spawns, and these specs are often run
+// from inside dsh): the spec must talk to ITS proxy on 127.0.0.1, not to the
+// live one, or the test proves nothing.
 const httpViaProxy = (path) => new Promise((resolvePromise, rejectPromise) => {
   const req = httpRequest({
-    host: '127.0.0.1', port: proxyPort,
+    host: '127.0.0.1', port: proxyPort, agent: false,
     method: 'GET', path: `http://${O1}${path}`,
   }, (res) => {
     let body = ''
@@ -134,6 +138,33 @@ const httpViaProxy = (path) => new Promise((resolvePromise, rejectPromise) => {
     })
     assert.equal(refused, true, `the proxy is unreachable on a non-loopback interface (${foreign.address})`)
   }
+}
+
+// ── scenario 0b: a mismatched Host neither crashes the host nor reaches the origin
+// Why: Node ≥ 24.22's http client throws synchronously when a supplied Host
+// disagrees with the request authority while env-proxy rewriting is active, and
+// RFC 9112 §3.2.2 requires a proxy to use the request-target's authority. The
+// client below deliberately sends the proxy's address as Host (what the other
+// helpers do implicitly), so this pins both the 502-not-crash behaviour and the
+// Host rewrite.
+writeCfg({ upstream: { enabled: false, host: '', port: 0 }, proxiedHosts: ['example.com'], knownHosts: [] })
+{
+  const res = await new Promise((resolvePromise, rejectPromise) => {
+    const req = httpRequest({
+      host: '127.0.0.1', port: proxyPort, method: 'GET', agent: false,
+      path: `http://${O1}/host-check`,
+      headers: { host: 'stale-host.example' },
+    }, (r) => {
+      let body = ''
+      r.on('data', (d) => { body += d })
+      r.on('end', () => resolvePromise({ status: r.statusCode, body }))
+    })
+    req.on('error', rejectPromise)
+    req.end()
+  })
+  assert.equal(res.status, 200, 'the proxy replaces a mismatched Host with the target authority')
+  assert.equal(res.body, 'origin:GET:/host-check', 'the rewritten request still reaches the origin')
+  assert.equal(o1.seen.at(-1).host, O1, 'the origin sees the target authority, not the client Host')
 }
 
 // ── scenario 1: direct HTTP forwarding (no upstream configured) ─────────────
@@ -170,7 +201,7 @@ writeCfg({
 // answers without contacting the origin.
 const httpViaProxyHost = (host, path) => new Promise((resolvePromise, rejectPromise) => {
   const req = httpRequest({
-    host: '127.0.0.1', port: proxyPort,
+    host: '127.0.0.1', port: proxyPort, agent: false,
     method: 'GET', path: `http://${host}${path}`,
   }, (res) => {
     let body = ''
@@ -859,5 +890,5 @@ proxy.close()
 up.srv.close()
 o1.srv.close()
 rmSync(work, { recursive: true, force: true })
-console.log('PASS — proxy-core (17 scenarios)')
+console.log('PASS — proxy-core (18 scenarios)')
 process.exit(0)

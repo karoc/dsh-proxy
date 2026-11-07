@@ -40,3 +40,4 @@ it passed for the wrong reason — this file exists so that cannot recur silentl
 | G28 | 配置文件损坏、被手工改坏或读到半写内容时**沿用上次成功解析的配置**，绝不静默退回默认值（默认值会关掉上游，把本该走代理的流量全部直连） | `a broken config file keeps the last good config instead of disabling the upstream` |
 | G29 | 转发代理**只绑 loopback**：断言的是 OS 实际回报的监听地址（不是代码里传的常量），并且非 loopback 接口上必须连不上——否则它会变成对全网开放的代理，还会替别人带上注入的凭据 | `the forward proxy binds loopback only` |
 | G30 | 发布产物（`npm pack` 的 tarball）**成员清单固定**、包内 `lib/*.js` 与仓库构建产物**逐字节一致**，并且能从"已安装布局"加载、起代理、供数、自装出网策略——别人装到的那份必须是验过的那份 | `the published tarball ships exactly the documented members` |
+| G31 | 代理**自身**的出站 HTTP 永不被启动环境的 `NODE_USE_ENV_PROXY`/`HTTP_PROXY` 捕获（否则纯 HTTP 转发会被送回自己）；显式 Agent 屏蔽 env-proxy，错配的 `Host` 被替换为请求目标的 authority（RFC 9112 §3.2.2），同步的客户端构造错误以 502 结束而不是抛出宿主进程 | `the proxy replaces a mismatched Host with the target authority` |

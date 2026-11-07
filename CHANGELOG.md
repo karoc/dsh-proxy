@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.18] - 2026-10-06
+## [0.1.18] - 2026-11-07
 
 ### Added
 
@@ -16,8 +16,25 @@
   install. Two negative controls keep it load-bearing (an extra shipped directory;
   a stale in-tarball bundle).
 
-  The runtime is unchanged in this version: the bundles do not embed the version,
-  so `lib/*.js` is the same code that 0.1.17 shipped.
+### Fixed
+
+- **The proxy's own outbound HTTP is no longer captured by the launch
+  environment's proxy** (G31). Node ≥ 24.22 makes `http.request` honor
+  `NODE_USE_ENV_PROXY`/`HTTP_PROXY`; the deployment this plugin documents
+  (systemd `Environment=…` so dsh's own fetch rides the proxy) therefore routed
+  the proxy's plain-HTTP forwarding — and its HTTP upstream leg — back into
+  itself. Those requests now go through an explicit `Agent` with no `proxyEnv`,
+  restoring the documented guarantee that the proxy never proxies itself.
+
+- **Absolute-form requests use the target authority as `Host`.** A client that
+  sent its own address (or anything else) in `Host` had it forwarded to the
+  origin; on Node ≥ 24.22 the resulting `Host`/authority disagreement threw
+  synchronously inside the request handler, which takes down the host process.
+  The header is now replaced per RFC 9112 §3.2.2, and a synchronous client
+  construction error answers `502` instead of escaping the handler.
+
+  The shipped `lib/*.js` changed accordingly; the bundles still do not embed the
+  version.
 
 ## [0.1.17] - 2026-10-06
 

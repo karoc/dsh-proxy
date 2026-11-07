@@ -24,11 +24,13 @@
  *   * loopback targets are ALWAYS direct (never sent to an upstream proxy);
  *   * an upstream pointing back at this very proxy is treated as disabled
  *     (self-loop guard);
- *   * the proxy itself uses raw net/http (never undici's env-proxy), so it can
- *     never route its own outbound connections back through itself.
+ *   * the proxy itself uses raw net/http through an explicit Agent (never the
+ *     environment proxy), so it can never route its own outbound connections
+ *     back through itself — even when the launch environment sets
+ *     NODE_USE_ENV_PROXY for the host's own fetch.
  */
 
-import { createServer, request as httpRequest } from 'node:http'
+import { Agent, createServer, request as httpRequest, type ClientRequest } from 'node:http'
 import { connect as tcpConnect, isIPv6, type Socket } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
 import type { Duplex } from 'node:stream'
@@ -536,6 +538,14 @@ export function createForwardProxy(opts: {
   const seenHosts = new Set<string>()
   let notifyTimer: NodeJS.Timeout | null = null
 
+  // This proxy IS the egress point. Node >= 24.22 lets an ambient
+  // `NODE_USE_ENV_PROXY`/`HTTP_PROXY` (which the documented systemd deployment
+  // sets before dsh starts) capture `http.request` calls — including these
+  // outbound legs, which would send them back into this very listener. An
+  // explicit Agent with no `proxyEnv` keeps the documented guarantee that the
+  // proxy never routes its own connections through an environment proxy.
+  const outboundAgent = new Agent({ keepAlive: true })
+
   const markHost = (host: string) => {
     const h = String(host ?? '').trim().toLowerCase()
     if (!h || isLoopbackHost(h)) return
@@ -597,6 +607,10 @@ export function createForwardProxy(opts: {
     const headers = { ...req.headers }
     delete headers['proxy-connection']
     delete headers['connection']
+    // RFC 9112 §3.2.2: a proxy replaces the received Host with the authority of
+    // the absolute-form request-target. Doing it here also keeps Node's client
+    // from rejecting a client-supplied Host that disagrees with the target.
+    headers.host = u.host
     // SOCKS5 upstreams only speak CONNECT (no absolute-URI HTTP): a plain
     // http:// target through one falls back to direct so the request still
     // works (rare combination; noted in the manager log).
@@ -608,26 +622,44 @@ export function createForwardProxy(opts: {
     if (useUpstream) {
       const auth = upstreamAuth(cfg)
       if (auth) headers['proxy-authorization'] = auth
-      const up = httpRequest(
-        { host: cfg.upstream.host, port: Number(cfg.upstream.port), method: req.method, path: req.url ?? '', headers },
-        (upRes) => {
-          res.writeHead(upRes.statusCode ?? 502, upRes.headers)
-          upRes.pipe(res)
-        },
-      )
+      let up: ClientRequest
+      try {
+        up = httpRequest(
+          { host: cfg.upstream.host, port: Number(cfg.upstream.port), method: req.method, path: req.url ?? '', headers, agent: outboundAgent },
+          (upRes) => {
+            res.writeHead(upRes.statusCode ?? 502, upRes.headers)
+            upRes.pipe(res)
+          },
+        )
+      } catch (e) {
+        // Node's client throws synchronously for options it refuses (an
+        // unserializable header value, or — before the Host rewrite above — a
+        // Host that disagrees with the authority). Never let that escape the
+        // server's request handler: it would take down the host process.
+        res.writeHead(502, { 'content-type': 'text/plain' })
+        res.end(`proxy: upstream error: ${(e as Error).message}`)
+        return
+      }
       up.on('error', (e) => {
         res.writeHead(502, { 'content-type': 'text/plain' })
         res.end(`proxy: upstream error: ${e.message}`)
       })
       req.pipe(up)
     } else {
-      const up = httpRequest(
-        { host, port, method: req.method, path: u.pathname + u.search, headers },
-        (upRes) => {
-          res.writeHead(upRes.statusCode ?? 502, upRes.headers)
-          upRes.pipe(res)
-        },
-      )
+      let up: ClientRequest
+      try {
+        up = httpRequest(
+          { host, port, method: req.method, path: u.pathname + u.search, headers, agent: outboundAgent },
+          (upRes) => {
+            res.writeHead(upRes.statusCode ?? 502, upRes.headers)
+            upRes.pipe(res)
+          },
+        )
+      } catch (e) {
+        res.writeHead(502, { 'content-type': 'text/plain' })
+        res.end(`proxy: origin error: ${(e as Error).message}`)
+        return
+      }
       up.on('error', (e) => {
         res.writeHead(502, { 'content-type': 'text/plain' })
         res.end(`proxy: origin error: ${e.message}`)
@@ -750,6 +782,7 @@ export function createForwardProxy(opts: {
     },
     close: () => {
       if (notifyTimer) clearTimeout(notifyTimer)
+      outboundAgent.destroy()
       server.close()
     },
   }

@@ -102,8 +102,11 @@ Safety rules (hard-coded, not configurable):
 - **loopback targets are always direct** — never sent to an upstream proxy;
 - an upstream pointing back at this very proxy is treated as **disabled**
   (self-loop guard);
-- the proxy itself uses raw `net`/`http`, so it can never route its own
-  outbound connections back through itself.
+- the proxy itself uses raw `net`/`http` through an explicit `Agent` that
+  ignores the environment proxy — even when the launch environment sets
+  `NODE_USE_ENV_PROXY=1` for dsh's own fetch, its outbound connections can never
+  be routed back through itself; a mismatched `Host` is replaced with the
+  request-target's authority (RFC 9112 §3.2.2).
 
 ### Config file
 

@@ -424,6 +424,38 @@ const scenarios = [
       writeFileSync(p, after)
     },
   },
+  {
+    // The proxy is the egress point. With NODE_USE_ENV_PROXY=1 in the launch
+    // environment (the deployment the README documents), Node's http client
+    // would rewrite this proxy's own outbound request through HTTP_PROXY — the
+    // proxy itself. The explicit Agent is the only thing preventing that; the
+    // hostile env makes the mutation fail deterministically.
+    name: 'the proxy lets an ambient env proxy capture its own outbound HTTP',
+    command: 'NODE_USE_ENV_PROXY=1 HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 NO_PROXY= no_proxy= node --test scripts/proxy-core.spec.mjs',
+    expect: /the proxy replaces a mismatched Host with the target authority/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace('const outboundAgent = new Agent({ keepAlive: true })', 'const outboundAgent = undefined')
+      if (after === before) throw new Error('mutation did not apply — the proxy no longer pins its outbound Agent')
+      writeFileSync(p, after)
+    },
+  },
+  {
+    // RFC 9112 §3.2.2: a proxy replaces the received Host with the request
+    // target's authority. Forwarding the client's Host lets a malformed request
+    // decide what the origin (and its virtual-host routing) sees.
+    name: 'a mismatched Host is forwarded to the origin',
+    command: 'node --test scripts/proxy-core.spec.mjs',
+    expect: /the origin sees the target authority, not the client Host/,
+    mutate: (dir) => {
+      const p = join(dir, 'src/proxy-core.ts')
+      const before = readFileSync(p, 'utf8')
+      const after = before.replace('    headers.host = u.host\n', '')
+      if (after === before) throw new Error('mutation did not apply — src/proxy-core.ts no longer rewrites the Host header')
+      writeFileSync(p, after)
+    },
+  },
 ]
 
 let failed = 0
